@@ -164,10 +164,13 @@ flow requires valid GBP conversions and blocks checkout when required pricing
 or shipping amounts cannot be verified. The buyer address and shipping country
 are constrained to the United Kingdom for the GB build.
 
-Cash on Delivery is disabled by the shared checkout pricing logic. Stripe is
-integrated for online payments, but payment-provider support and enabled
-payment methods are deployment/provider configuration concerns; verify live
-provider and currency support before enabling order-taking in any market.
+Cash on Delivery is disabled by the shared checkout pricing logic. Online
+payments are provider-routed by storefront hostname, with Stripe remaining the
+default everywhere (including `bzead.uk`) until explicitly switched.
+
+The `VITE_PAYMENT_PROVIDER_BZEAD_UK` variable can explicitly set the UK
+provider to `revolut` for controlled rollout/testing. If not set, UK storefront
+traffic continues to use Stripe.
 
 ### Currency and rates
 
@@ -255,6 +258,9 @@ Function directories:
 
 - `create-payment-intent`, `stripe-webhook`, and `refund-payment` — Stripe
   payment lifecycle.
+- `create-revolut-order` and `verify-revolut-order` — Revolut payment
+  initialization and secure post-return verification/recovery for the UK
+  storefront.
 - `shiprocket-rate`, `shiprocket-ops`, and `intl-tracking-webhook` — Shiprocket
   rating, shipment operations, and tracking updates.
 - `shippo-rate`, `shippo-ops`, and `shippo-webhook` — Shippo rates, shipment
@@ -267,6 +273,13 @@ Function directories:
   notification operations.
 - `reverse-geocode` — location lookup support.
 - `product-og` and `product-og-image` — product sharing metadata/image support.
+
+Browser-invoked Edge Functions use explicit CORS allowlists. Keep storefront
+origins in those lists (`https://www.bzead.uk`, `https://bzead.uk`,
+`https://www.bzead.com`, `https://bzead.com`, `https://www.bzead.in`,
+`https://bzead.in`, `https://www.bzead.asia`, `https://bzead.asia`,
+`https://www.bzead.eu`, `https://bzead.eu`) alongside local development
+origins.
 
 The functions present in the repository are not proof that every function is
 currently deployed, configured, or enabled in production. Check the linked
@@ -291,15 +304,17 @@ Other frontend configuration can include:
 - `VITE_MARKET=GB` — market selector; the project scripts set this for the UK
   buyer build.
 - `VITE_STRIPE_PUBLISHABLE_KEY` — public Stripe.js key.
+- `VITE_PAYMENT_PROVIDER_BZEAD_UK` — optional override (`stripe` or `revolut`)
+  for hostname-matched UK storefront traffic.
 - `VITE_ONESIGNAL_APP_ID` — public OneSignal application ID.
 - `VITE_ADSENSE_CLIENT` and `VITE_ADSENSE_SLOT_HOME_FOOTER` — optional ad setup.
 - `VITE_DOMAIN` — legacy/alternate public URL input used by URL helpers.
 
-Secrets such as Stripe secret keys, Supabase service-role/access tokens,
-Shiprocket/Shippo credentials, email provider keys, exchange-rate API keys,
-and OneSignal REST keys belong in trusted server-side configuration (normally
-Supabase secrets), never in `VITE_*` variables. Do not commit real `.env`
-files.
+Secrets such as Stripe secret keys, Revolut secret keys, Supabase service-role/access
+tokens, Shiprocket/Shippo credentials, email provider keys, exchange-rate API
+keys, and OneSignal REST keys belong in trusted server-side configuration
+(normally Supabase secrets), never in `VITE_*` variables. Do not commit real
+`.env` files.
 
 ## 10. Local development, build, and tests
 

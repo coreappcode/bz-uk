@@ -8,6 +8,14 @@ const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') || '
 const SITE_URL = 'https://www.bzead.com';
 
 const ALLOWED_ORIGINS = [
+  'https://bzead.uk',
+  'https://www.bzead.uk',
+  'https://bzead.in',
+  'https://www.bzead.in',
+  'https://bzead.asia',
+  'https://www.bzead.asia',
+  'https://bzead.eu',
+  'https://www.bzead.eu',
   'https://www.bzead.com',
   'https://bzead.com',
   'http://localhost:5173',

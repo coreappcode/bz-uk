@@ -16,6 +16,8 @@ import {
   createPaymentIntent,
   toStripeAmount,
 } from '../../lib/stripeService';
+import { createRevolutOrder, verifyRevolutOrder } from '../../lib/revolutService';
+import { resolveCheckoutPaymentProvider, type CheckoutPaymentProvider } from '../../lib/paymentProvider';
 import { fetchMultiSellerTat, checkDeliveryServiceability } from '../../lib/tatService';
 import { calculateDestinationCheckoutPricing, type DestinationCheckoutPricing } from '../../lib/checkoutPricingService';
 import { useCurrency } from '../../contexts/CurrencyContext';
@@ -290,6 +292,7 @@ const waitForRecoveredOrder = async (
 };
 
 const TEMP_PENDING_ORDERS_KEY = 'beauzead_temp_pending_orders';
+const REVOLUT_PENDING_ORDER_ID_KEY = 'beauzead_revolut_pending_order_id';
 
 type TempPendingOrderRecord = {
   tempOrderId: string;
@@ -396,6 +399,7 @@ const buildCheckoutRpcParams = ({
   shippingRateId,
   expectedDeliveryDateIso,
   expectedDeliveryDays,
+  idempotencyPrefix = 'stripe',
 }: {
   customerId: string;
   items: CheckoutItem[];
@@ -418,6 +422,7 @@ const buildCheckoutRpcParams = ({
   shippingRateId?: string | null;
   expectedDeliveryDateIso?: string | null;
   expectedDeliveryDays?: number | null;
+  idempotencyPrefix?: 'stripe' | 'revolut' | 'cod';
 }) => {
   const params: Record<string, unknown> = {
     p_user_id: customerId,
@@ -433,7 +438,7 @@ const buildCheckoutRpcParams = ({
     p_actual_shipping_cost: actualShippingCost ?? 0,
     p_platform_shipping_margin: platformShippingMargin ?? 0,
     // p_fx_rate omitted: derived server-side from countries.exchange_rate (audit rule C/D)
-    p_idempotency_key: `stripe_${paymentIntentId}`,
+    p_idempotency_key: `${idempotencyPrefix}_${paymentIntentId}`,
     p_shipping_carrier: shippingCarrier || null,
     p_shipping_service_level: shippingServiceLevel || null,
     p_shipping_provider: shippingProvider || null,
@@ -1627,6 +1632,7 @@ const Checkout: React.FC = () => {
   const location = useLocation();
   const navigate = useNavigate();
   const checkoutData = location.state as CheckoutLocationState | undefined;
+  const checkoutPaymentProvider: CheckoutPaymentProvider = resolveCheckoutPaymentProvider();
 
   const { rates, formatPrice } = useCurrency();
   const [clientSecret, setClientSecret] = useState<string | null>(null);
@@ -1648,6 +1654,7 @@ const Checkout: React.FC = () => {
   // and the PaymentIntent creation effect without leaving the page. Lets users
   // recover from transient backend / network failures on slow mobile links.
   const [paymentInitRetryToken, setPaymentInitRetryToken] = useState(0);
+  const [revolutRedirectLoading, setRevolutRedirectLoading] = useState(false);
   const quoteRequestRef = useRef(0);
   // M7: Track last PI signature to avoid creating orphaned PaymentIntents
   const lastPiSignatureRef = useRef<string | null>(null);
@@ -1782,6 +1789,14 @@ const Checkout: React.FC = () => {
         setLoading(true);
         setInitError(null);
 
+        if (checkoutPaymentProvider === 'revolut') {
+          if (!cancelled) {
+            setClientSecret(null);
+            setPaymentIntentId(null);
+          }
+          return;
+        }
+
         const checkoutCurrency = (checkoutData.currency || 'INR').toUpperCase();
 
         const stripePublishableKey = String(import.meta.env.VITE_STRIPE_PUBLISHABLE_KEY || '').trim();
@@ -1832,7 +1847,7 @@ const Checkout: React.FC = () => {
     return () => {
       cancelled = true;
     };
-  }, [checkoutData, liveQuote, liveQuoteLoading, liveQuoteError, paymentInitRetryToken]);
+  }, [checkoutData, liveQuote, liveQuoteLoading, liveQuoteError, paymentInitRetryToken, checkoutPaymentProvider]);
 
   // --- Derived values (computed before early returns so hooks below are always called) ---
   // Cash on Delivery is not offered by the web checkout.
@@ -1842,6 +1857,175 @@ const Checkout: React.FC = () => {
   const minimumOrderNotMet = Boolean(
     liveQuote?.minimumOrderConstraint && !liveQuote.minimumOrderConstraint.isMet
   );
+
+  const handleRevolutCheckout = useCallback(async () => {
+    if (!checkoutData || !liveQuote) return;
+    setRevolutRedirectLoading(true);
+    setInitError(null);
+    try {
+      const checkoutCurrency = (checkoutData.currency || 'GBP').toUpperCase();
+      const amount = toStripeAmount(liveQuote.totalAmount, checkoutCurrency);
+      if (!Number.isFinite(amount) || amount <= 0) {
+        throw new Error('Invalid checkout total. Please return to review and try again.');
+      }
+
+      const returnUrl = buildAppRedirect('/checkout/payment?revolut_return=1');
+      const response = await createRevolutOrder({
+        amount,
+        currency: checkoutCurrency,
+        description: `BZEAD order for ${checkoutData.customerEmail}`,
+        metadata: {
+          customer_id: checkoutData.customerId,
+          customer_email: checkoutData.customerEmail,
+          item_count: String(checkoutData.items.length),
+        },
+        customer: {
+          email: checkoutData.customerEmail,
+          fullName: checkoutData.customerName,
+        },
+        returnUrl,
+        cancelUrl: buildAppRedirect('/checkout/payment'),
+        failureUrl: buildAppRedirect('/checkout/payment'),
+      });
+
+      const revolutOrderId = String(response.orderId || '').trim();
+      if (!revolutOrderId) {
+        throw new Error('Revolut order ID is missing. Please try again.');
+      }
+
+      const enrichedShippingAddress = {
+        ...checkoutData.shippingAddress,
+        full_name: checkoutData.customerName || (checkoutData.shippingAddress as any).full_name || null,
+        phone: checkoutData.customerPhone || (checkoutData.shippingAddress as any).phone || null,
+      };
+
+      const effectiveShippingProvider = resolveCheckoutShippingProvider(
+        checkoutData.shippingProvider,
+        checkoutData.shippingAddress.country,
+        checkoutData.shippingAddress.countryCode,
+      );
+
+      const rpcParams = buildCheckoutRpcParams({
+        customerId: checkoutData.customerId,
+        items: checkoutData.items,
+        productMeta,
+        shippingAddress: enrichedShippingAddress,
+        billingAddress: checkoutData.shippingAddress,
+        customerPhone: checkoutData.customerPhone,
+        notes: checkoutData.notes,
+        paymentIntentId: revolutOrderId,
+        paymentMethod: 'revolut_card',
+        paymentStatus: 'pending',
+        orderStatus: 'pending',
+        checkoutCurrency,
+        shippingAmount: liveQuote.shippingAmount,
+        actualShippingCost: liveQuote.actualShippingCost,
+        platformShippingMargin: liveQuote.platformShippingMargin,
+        shippingCarrier: checkoutData.shippingCarrier || null,
+        shippingServiceLevel: checkoutData.shippingServiceLevel || null,
+        shippingProvider: effectiveShippingProvider,
+        shippingRateId: checkoutData.shippingRateId || null,
+        expectedDeliveryDateIso: checkoutData.estimatedDeliveryDate || null,
+        expectedDeliveryDays: checkoutData.estimatedDeliveryDays
+          ? parseInt(checkoutData.estimatedDeliveryDays, 10) || null
+          : null,
+        idempotencyPrefix: 'revolut',
+      });
+
+      const { error: snapshotErr } = await upsertCheckoutRecoverySnapshot({
+        userId: checkoutData.customerId,
+        paymentIntentId: revolutOrderId,
+        rpcParams,
+      });
+      if (snapshotErr) {
+        throw new Error('Unable to prepare secure order recovery right now. Please try again.');
+      }
+
+      if (typeof window !== 'undefined') {
+        localStorage.setItem(REVOLUT_PENDING_ORDER_ID_KEY, revolutOrderId);
+      }
+
+      if (!response.checkoutUrl) {
+        throw new Error('Revolut checkout URL is not available. Please verify Revolut account setup.');
+      }
+
+      window.location.assign(response.checkoutUrl);
+    } catch (err) {
+      console.error('[Checkout] createRevolutOrder failed:', err);
+      setInitError(err instanceof Error ? err.message : 'Failed to initialize Revolut payment');
+      setRevolutRedirectLoading(false);
+    }
+  }, [checkoutData, liveQuote, productMeta]);
+
+  useEffect(() => {
+    if (checkoutPaymentProvider !== 'revolut' || !checkoutData || typeof window === 'undefined') {
+      return;
+    }
+
+    const pendingOrderId = String(localStorage.getItem(REVOLUT_PENDING_ORDER_ID_KEY) || '').trim();
+    if (!pendingOrderId) return;
+
+    const searchParams = new URLSearchParams(window.location.search);
+    const isReturn = searchParams.has('revolut_return');
+    if (!isReturn) return;
+
+    let cancelled = false;
+    setLoading(true);
+
+    void (async () => {
+      try {
+        const verification = await verifyRevolutOrder(pendingOrderId);
+        if (cancelled) return;
+
+        if (!verification.isPaid) {
+          setInitError('Payment is not completed yet. Please complete Revolut payment and try again.');
+          setLoading(false);
+          return;
+        }
+
+        const recoveredOrder = await waitForRecoveredOrder(pendingOrderId, 18_000, 1_500);
+        if (!recoveredOrder?.id) {
+          setInitError('Payment succeeded but order confirmation is still processing. Please refresh in a few moments.');
+          setLoading(false);
+          return;
+        }
+
+        localStorage.removeItem(REVOLUT_PENDING_ORDER_ID_KEY);
+        const checkoutResultItems: CheckoutResultItem[] = checkoutData.items.map((item) => ({
+          productId: item.productId,
+          productName: item.productName,
+          quantity: item.quantity,
+          price: item.price,
+          productImage: item.productImage,
+          selectedSize: item.selectedSize,
+          selectedColor: item.selectedColor,
+        }));
+
+        navigate('/checkout/confirmation', {
+          state: {
+            checkoutResult: {
+              paymentResult: 'success' as const,
+              paymentIntentId: pendingOrderId,
+              orderId: String(recoveredOrder.id),
+              items: checkoutResultItems,
+              totalAmount: liveQuote?.totalAmount ?? checkoutData.totalAmount,
+              currency: checkoutData.currency || 'GBP',
+            },
+          },
+          replace: true,
+        });
+      } catch (err) {
+        if (cancelled) return;
+        console.error('[Checkout] Revolut verification failed:', err);
+        setInitError(err instanceof Error ? err.message : 'Unable to verify Revolut payment');
+        setLoading(false);
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [checkoutPaymentProvider, checkoutData, liveQuote, navigate]);
 
   // SL6: Standalone COD state + handler for initError fallback (no Stripe context needed)
   const [codFallbackLoading, setCodFallbackLoading] = useState(false);
@@ -2063,7 +2247,9 @@ const Checkout: React.FC = () => {
   if (loading || liveQuoteLoading) {
     const loadingMessage = liveQuoteLoading
       ? 'Checking configured shipping rates and live carrier fallback...'
-      : 'Initializing secure payment...';
+      : checkoutPaymentProvider === 'revolut'
+        ? 'Initializing Revolut checkout...'
+        : 'Initializing secure payment...';
     return (
       <>
         <Header />
@@ -2121,7 +2307,7 @@ const Checkout: React.FC = () => {
     }
   }
 
-  if (!initError && (!clientSecret || !paymentIntentId)) {
+  if (checkoutPaymentProvider === 'stripe' && !initError && (!clientSecret || !paymentIntentId)) {
     return (
       <>
         <Header />
@@ -2137,7 +2323,7 @@ const Checkout: React.FC = () => {
   }
 
   // --- Main checkout UI ---
-  const stripePromise = getStripe();
+  const stripePromise = checkoutPaymentProvider === 'stripe' ? getStripe() : null;
 
   return (
     <div className="min-h-screen bg-[#eaeded] flex flex-col">
@@ -2197,6 +2383,34 @@ const Checkout: React.FC = () => {
             </div>
           )}
           </>
+        ) : checkoutPaymentProvider === 'revolut' ? (
+          <div className="max-w-2xl mx-auto bg-white border border-[#ddd] rounded-lg p-6 space-y-4">
+            <h3 className="text-lg font-bold text-[#0f1111]">Pay securely with Revolut</h3>
+            <p className="text-sm text-[#555]">
+              You’ll be redirected to Revolut’s secure payment step and then returned automatically.
+            </p>
+            <button
+              onClick={handleRevolutCheckout}
+              disabled={revolutRedirectLoading || !checkoutData || !liveQuote}
+              className="w-full py-3.5 bg-[#ffd814] hover:bg-[#f7ca00] border border-[#fcd200] disabled:bg-gray-200 disabled:border-gray-300 disabled:cursor-not-allowed text-[#0f1111] rounded-lg text-[15px] font-bold cursor-pointer transition-colors flex items-center justify-center gap-2"
+            >
+              {revolutRedirectLoading ? (
+                <><Loader2 size={16} className="animate-spin" /> Redirecting to Revolut...</>
+              ) : (
+                `Continue to Revolut — ${fmtCurrency(liveQuote?.totalAmount ?? checkoutData.totalAmount, checkoutData.currency || 'GBP')}`
+              )}
+            </button>
+            <div className="flex items-center justify-between">
+              <button
+                type="button"
+                onClick={() => navigate('/checkout/review')}
+                className="text-sm text-[#007185] hover:underline font-medium"
+              >
+                ← Back to Review
+              </button>
+              <span className="text-[11px] text-[#555] font-medium">Powered by Revolut</span>
+            </div>
+          </div>
         ) : (
           <Elements
             stripe={stripePromise}

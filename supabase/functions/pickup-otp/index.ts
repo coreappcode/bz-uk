@@ -9,6 +9,14 @@ declare const Deno: {
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.49.1';
 
 const ALLOWED_ORIGINS = [
+  'https://bzead.uk',
+  'https://www.bzead.uk',
+  'https://bzead.in',
+  'https://www.bzead.in',
+  'https://bzead.asia',
+  'https://www.bzead.asia',
+  'https://bzead.eu',
+  'https://www.bzead.eu',
   'https://www.bzead.com',
   'https://bzead.com',
   'http://localhost:5173',

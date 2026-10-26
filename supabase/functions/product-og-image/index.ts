@@ -11,11 +11,35 @@ const LOGO_URL = `${SITE_URL}/images/logo/bzead-logo.png`;
 const MAX_EDGE = 1200;
 const JPEG_QUALITY = 82;
 
-const corsHeaders = {
-  'Access-Control-Allow-Origin': '*',
-  'Access-Control-Allow-Methods': 'GET, OPTIONS',
-  'Access-Control-Allow-Headers': 'Content-Type',
-};
+const ALLOWED_ORIGINS = [
+  'https://bzead.uk',
+  'https://www.bzead.uk',
+  'https://bzead.in',
+  'https://www.bzead.in',
+  'https://bzead.asia',
+  'https://www.bzead.asia',
+  'https://bzead.eu',
+  'https://www.bzead.eu',
+  'https://www.bzead.com',
+  'https://bzead.com',
+  'http://localhost:5173',
+  'http://127.0.0.1:5173',
+  'http://localhost:4173',
+  'http://127.0.0.1:4173',
+  'https://localhost',
+  'capacitor://localhost',
+  'ionic://localhost',
+];
+
+function getCorsHeaders(req?: Request) {
+  const origin = req?.headers.get('origin') || '';
+  const allowedOrigin = ALLOWED_ORIGINS.includes(origin) ? origin : ALLOWED_ORIGINS[0];
+  return {
+    'Access-Control-Allow-Origin': allowedOrigin,
+    'Access-Control-Allow-Methods': 'GET, OPTIONS',
+    'Access-Control-Allow-Headers': 'Content-Type',
+  };
+}
 
 function pickImageUrl(product: { image_url?: string | null; images?: string[] | null } | null): string {
   if (!product) return '';
@@ -57,13 +81,13 @@ async function toSocialJpeg(sourceUrl: string): Promise<Uint8Array | null> {
   }
 }
 
-async function logoFallback(): Promise<Response> {
+async function logoFallback(req?: Request): Promise<Response> {
   const bytes = await fetchBytes(LOGO_URL);
-  if (!bytes) return new Response('Image unavailable', { status: 404, headers: corsHeaders });
+  if (!bytes) return new Response('Image unavailable', { status: 404, headers: getCorsHeaders(req) });
   return new Response(bytes, {
     status: 200,
     headers: {
-      ...corsHeaders,
+      ...getCorsHeaders(req),
       'Content-Type': 'image/png',
       'Cache-Control': 'public, max-age=3600',
     },
@@ -72,12 +96,12 @@ async function logoFallback(): Promise<Response> {
 
 serve(async (req) => {
   if (req.method === 'OPTIONS') {
-    return new Response(null, { status: 204, headers: corsHeaders });
+    return new Response(null, { status: 204, headers: getCorsHeaders(req) });
   }
 
   try {
     const slug = (new URL(req.url).searchParams.get('slug') || '').replace(/\/+$/, '').trim();
-    if (!slug) return new Response('Missing slug', { status: 400, headers: corsHeaders });
+    if (!slug) return new Response('Missing slug', { status: 400, headers: getCorsHeaders(req) });
 
     const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
     const { data: product } = await supabase
@@ -87,21 +111,21 @@ serve(async (req) => {
       .maybeSingle();
 
     const imageUrl = pickImageUrl(product);
-    if (!imageUrl) return logoFallback();
+    if (!imageUrl) return logoFallback(req);
 
     const jpeg = await toSocialJpeg(imageUrl);
-    if (!jpeg) return logoFallback();
+    if (!jpeg) return logoFallback(req);
 
     return new Response(jpeg, {
       status: 200,
       headers: {
-        ...corsHeaders,
+        ...getCorsHeaders(req),
         'Content-Type': 'image/jpeg',
         'Cache-Control': 'public, max-age=86400, s-maxage=604800',
       },
     });
   } catch (err) {
     console.error('product-og-image error:', err);
-    return logoFallback();
+    return logoFallback(req);
   }
 });
