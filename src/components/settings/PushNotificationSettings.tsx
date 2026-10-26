@@ -18,7 +18,7 @@ import { Bell, BellOff, Check, Loader2, ShieldAlert } from 'lucide-react';
 import { supabase } from '../../lib/supabase';
 import logger from '../../utils/logger';
 import { isNativePlatform } from '../../mobile/nativePlatform';
-import { isOneSignalConfigured } from '../../lib/oneSignalConfig';
+import { isFirebaseWebPushConfigured } from '../../lib/oneSignalConfig';
 import { useWebPushSubscription } from '../../hooks/useWebPushSubscription';
 import {
   DEFAULT_NOTIFICATION_PREFERENCES,
@@ -155,8 +155,8 @@ export const PushNotificationSettings: React.FC<PushNotificationSettingsProps> =
   const categoriesDisabled = masterDisabled || !masterChecked;
 
   const statusBadge = useMemo(() => {
-    if (!isOneSignalConfigured) {
-      return <span className="text-xs text-gray-500">Web push not configured</span>;
+    if (!isFirebaseWebPushConfigured) {
+      return <span className="text-xs text-gray-500">Firebase web push not configured</span>;
     }
     if (!push.supported) {
       return <span className="text-xs text-gray-500">Not supported in this browser</span>;

@@ -102,7 +102,9 @@ storefront. Seller links redirect to the seller portal on BZEAD.COM.
 - Stripe.js and Stripe Payment Element are used for online payment flows.
 - Shiprocket and Shippo services are represented in the checkout/shipping
   code and Supabase Edge Functions.
-- OneSignal is used for push-notification integration.
+- Firebase Cloud Messaging (FCM) is used for push-notification integration
+  (native app and browser web push). OneSignal remains a server-side fallback
+  channel for legacy web subscribers.
 - Exchange rates are fetched through the exchange-rate service and Supabase
   functions; secret API keys belong on the server.
 - Optional Google AdSense slots can be enabled using public build variables.
@@ -285,7 +287,8 @@ The functions present in the repository are not proof that every function is
 currently deployed, configured, or enabled in production. Check the linked
 Supabase project and its secrets/provider credentials before relying on one.
 Never place service-role keys, payment secrets, shipping credentials, email
-credentials, or OneSignal REST credentials in frontend build variables.
+credentials, OneSignal REST credentials, or Firebase service-account private
+keys in frontend build variables.
 
 ## 9. Environment variables and secrets
 
@@ -306,14 +309,21 @@ Other frontend configuration can include:
 - `VITE_STRIPE_PUBLISHABLE_KEY` — public Stripe.js key.
 - `VITE_PAYMENT_PROVIDER_BZEAD_UK` — optional override (`stripe` or `revolut`)
   for hostname-matched UK storefront traffic.
-- `VITE_ONESIGNAL_APP_ID` — public OneSignal application ID.
+- `VITE_FIREBASE_API_KEY` — Firebase web app API key.
+- `VITE_FIREBASE_AUTH_DOMAIN` — Firebase auth domain.
+- `VITE_FIREBASE_PROJECT_ID` — Firebase project id.
+- `VITE_FIREBASE_STORAGE_BUCKET` — Firebase storage bucket.
+- `VITE_FIREBASE_MESSAGING_SENDER_ID` — Firebase messaging sender id.
+- `VITE_FIREBASE_APP_ID` — Firebase web app id.
+- `VITE_FIREBASE_VAPID_KEY` — Firebase web push VAPID key.
 - `VITE_ADSENSE_CLIENT` and `VITE_ADSENSE_SLOT_HOME_FOOTER` — optional ad setup.
 - `VITE_DOMAIN` — legacy/alternate public URL input used by URL helpers.
 
 Secrets such as Stripe secret keys, Revolut secret keys, Supabase service-role/access
 tokens, Shiprocket/Shippo credentials, email provider keys, exchange-rate API
-keys, and OneSignal REST keys belong in trusted server-side configuration
-(normally Supabase secrets), never in `VITE_*` variables. Do not commit real
+keys, OneSignal REST keys, and Firebase service-account credentials belong in
+trusted server-side configuration (normally Supabase secrets), never in
+`VITE_*` variables. Do not commit real
 `.env` files.
 
 ## 10. Local development, build, and tests

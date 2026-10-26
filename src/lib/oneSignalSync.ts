@@ -1,4 +1,4 @@
-// Unified OneSignal external_id sync — calls both web and native helpers.
+// Unified push identity sync — keeps native/web token ownership bound to the current user.
 // One of them is a no-op depending on the current platform.
 import { setNativePushExternalId } from '../mobile/nativePushNotifications';
 import { setWebPushExternalId } from './oneSignalWeb';

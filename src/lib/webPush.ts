@@ -1,33 +1,22 @@
-/**
- * webPush.ts
- * ----------
- * High-level browser-only API for managing the user's OneSignal Web push
- * subscription from inside the app (e.g. a Settings toggle).
- *
- * Wraps the OneSignal Web SDK v16 surface so callers don't have to deal
- * with availability checks, partial API support across SDK versions, or
- * native-platform no-ops.
- *
- * All functions are safe to call in any environment: when running inside
- * a Capacitor native shell, when OneSignal isn't configured, when the
- * browser lacks Notification API support, or when the SDK fails to load,
- * they degrade gracefully (return a `null`/`unsupported` state and never
- * throw).
- */
-
-import logger from '../utils/logger';
 import { isNativePlatform } from '../mobile/nativePlatform';
+import { PUSH_TOKEN_UPDATED_EVENT } from '../mobile/pushConstants';
 import { isOneSignalConfigured } from './oneSignalConfig';
-import { whenWebPushReady, type OneSignalSdk } from './oneSignalWeb';
+import {
+  clearWebPushToken,
+  getStoredWebPushToken,
+  requestWebPushToken,
+  whenWebPushReady,
+} from './oneSignalWeb';
+import {
+  registerPushTokenForCurrentSession,
+  unregisterPushTokenForCurrentSession,
+} from './pushTokenService';
 
 export type WebPushPermission = 'default' | 'granted' | 'denied' | 'unsupported';
 
 export interface WebPushState {
-  /** False when web push cannot be used in this environment at all. */
   supported: boolean;
-  /** Current browser-level Notification permission. */
   permission: WebPushPermission;
-  /** True when the user is currently subscribed in OneSignal. */
   optedIn: boolean;
 }
 
@@ -37,7 +26,6 @@ const UNSUPPORTED_STATE: WebPushState = Object.freeze({
   optedIn: false,
 });
 
-/** True only on a real browser tab where web push is even possible. */
 export function isWebPushApplicable(): boolean {
   if (isNativePlatform) return false;
   if (!isOneSignalConfigured) return false;
@@ -47,141 +35,86 @@ export function isWebPushApplicable(): boolean {
   return true;
 }
 
-function readPermission(sdk: OneSignalSdk | null): WebPushPermission {
-  // Prefer SDK-reported permission, fall back to the standard Notification API.
-  const native = sdk?.Notifications?.permissionNative;
-  if (native === 'granted' || native === 'denied' || native === 'default') {
-    return native;
-  }
-  if (typeof Notification !== 'undefined') {
-    const p = Notification.permission;
-    if (p === 'granted' || p === 'denied' || p === 'default') return p;
+function readPermission(): WebPushPermission {
+  if (typeof Notification === 'undefined') return 'unsupported';
+  const permission = Notification.permission;
+  if (permission === 'granted' || permission === 'denied' || permission === 'default') {
+    return permission;
   }
   return 'default';
 }
 
-function readOptedIn(sdk: OneSignalSdk | null): boolean {
-  return sdk?.User?.PushSubscription?.optedIn === true;
+function readOptedIn(): boolean {
+  return getStoredWebPushToken().length > 0;
+}
+
+function readState(): WebPushState {
+  if (!isWebPushApplicable()) return UNSUPPORTED_STATE;
+  return {
+    supported: true,
+    permission: readPermission(),
+    optedIn: readOptedIn(),
+  };
+}
+
+function emitState(callback: (state: WebPushState) => void): void {
+  callback(readState());
 }
 
 export async function getWebPushState(): Promise<WebPushState> {
   if (!isWebPushApplicable()) return UNSUPPORTED_STATE;
-  const sdk = await whenWebPushReady();
-  if (!sdk) return UNSUPPORTED_STATE;
-  return {
-    supported: true,
-    permission: readPermission(sdk),
-    optedIn: readOptedIn(sdk),
-  };
+  await whenWebPushReady();
+  return readState();
 }
 
-/**
- * Attempts to subscribe the user to web push.
- *  - If browser permission is `denied`, returns without prompting (the
- *    user must re-enable from browser site settings — the UI surfaces this).
- *  - If permission is `default`, requests it and then opts in.
- *  - If permission is `granted`, opts in directly.
- */
 export async function enableWebPush(): Promise<WebPushState> {
   if (!isWebPushApplicable()) return UNSUPPORTED_STATE;
-  const sdk = await whenWebPushReady();
-  if (!sdk) return UNSUPPORTED_STATE;
+  await whenWebPushReady();
 
-  let permission = readPermission(sdk);
-  if (permission === 'denied') {
-    return { supported: true, permission, optedIn: readOptedIn(sdk) };
+  let permission = readPermission();
+  if (permission === 'denied') return readState();
+
+  if (permission !== 'granted' && typeof Notification.requestPermission === 'function') {
+    permission = await Notification.requestPermission();
   }
 
-  try {
-    if (permission !== 'granted') {
-      // Prefer the SDK helper (also registers the OneSignal SW) and fall
-      // back to the standard browser request if unavailable.
-      if (typeof sdk.Notifications?.requestPermission === 'function') {
-        const res = await sdk.Notifications.requestPermission();
-        if (res === 'granted' || res === 'denied' || res === 'default') {
-          permission = res;
-        }
-      } else if (typeof Notification !== 'undefined'
-        && typeof Notification.requestPermission === 'function') {
-        const res = await Notification.requestPermission();
-        if (res === 'granted' || res === 'denied' || res === 'default') {
-          permission = res;
-        }
-      }
-    }
+  if (permission !== 'granted') return readState();
 
-    if (permission === 'granted'
-      && typeof sdk.User?.PushSubscription?.optIn === 'function') {
-      await sdk.User.PushSubscription.optIn();
-    }
-  } catch (error) {
-    logger.error('enableWebPush failed', { error });
-  }
+  const token = await requestWebPushToken();
+  if (!token) return readState();
 
-  return {
-    supported: true,
-    permission: readPermission(sdk),
-    optedIn: readOptedIn(sdk),
-  };
+  await registerPushTokenForCurrentSession(token);
+  return readState();
 }
 
 export async function disableWebPush(): Promise<WebPushState> {
   if (!isWebPushApplicable()) return UNSUPPORTED_STATE;
-  const sdk = await whenWebPushReady();
-  if (!sdk) return UNSUPPORTED_STATE;
 
-  try {
-    if (typeof sdk.User?.PushSubscription?.optOut === 'function') {
-      await sdk.User.PushSubscription.optOut();
-    }
-  } catch (error) {
-    logger.error('disableWebPush failed', { error });
+  const existingToken = getStoredWebPushToken();
+  if (existingToken) {
+    await unregisterPushTokenForCurrentSession(existingToken);
   }
-
-  return {
-    supported: true,
-    permission: readPermission(sdk),
-    optedIn: readOptedIn(sdk),
-  };
+  await clearWebPushToken();
+  return readState();
 }
 
-/**
- * Subscribes to push-subscription state changes. Returns an unsubscribe
- * function. Safe to call when web push isn't applicable (no-op).
- */
 export function onWebPushStateChange(
   callback: (state: WebPushState) => void,
 ): () => void {
   if (!isWebPushApplicable()) return () => undefined;
 
-  let active = true;
-  let sdkRef: OneSignalSdk | null = null;
-
-  const subHandler = (): void => {
-    if (!active) return;
-    callback({
-      supported: true,
-      permission: readPermission(sdkRef),
-      optedIn: readOptedIn(sdkRef),
-    });
+  const handleTokenUpdate = (): void => emitState(callback);
+  const handleVisibilityChange = (): void => {
+    if (document.visibilityState !== 'visible') return;
+    emitState(callback);
   };
-  const permHandler = subHandler;
 
-  void whenWebPushReady().then((sdk) => {
-    if (!active) return;
-    sdkRef = sdk;
-    if (!sdk) return;
-    sdk.User?.PushSubscription?.addEventListener?.('change', subHandler);
-    sdk.Notifications?.addEventListener?.('permissionChange', permHandler);
-    // Emit an initial snapshot so consumers don't have to call getWebPushState separately.
-    subHandler();
-  });
+  window.addEventListener(PUSH_TOKEN_UPDATED_EVENT, handleTokenUpdate as EventListener);
+  document.addEventListener('visibilitychange', handleVisibilityChange);
+  emitState(callback);
 
   return () => {
-    active = false;
-    const sdk = sdkRef;
-    if (!sdk) return;
-    sdk.User?.PushSubscription?.removeEventListener?.('change', subHandler);
-    sdk.Notifications?.removeEventListener?.('permissionChange', permHandler);
+    window.removeEventListener(PUSH_TOKEN_UPDATED_EVENT, handleTokenUpdate as EventListener);
+    document.removeEventListener('visibilitychange', handleVisibilityChange);
   };
 }

@@ -1,7 +1,7 @@
 /**
  * useWebPushSubscription
  * ----------------------
- * React hook exposing the current OneSignal web-push state and explicit
+ * React hook exposing the current Firebase web-push state and explicit
  * enable/disable actions. Subscribes to SDK change events so the UI
  * reflects external changes (e.g. user revoking permission in browser
  * site settings).

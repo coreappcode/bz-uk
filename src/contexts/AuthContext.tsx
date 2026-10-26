@@ -381,8 +381,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
   useEffect(() => {
     if (typeof window === 'undefined') return;
-    // Push notifications: tag the OneSignal subscription with the current user id
-    // (or clear it on sign-out). Replaces the old FCM device-token registration.
+    // Push notifications: bind/unbind current device token to the active user id
+    // (or clear it on sign-out).
     void syncOneSignalExternalId(currentAuthUser?.userId || null);
   }, [currentAuthUser?.userId]);
 
@@ -513,7 +513,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     try {
       syncOneSignalExternalId(null);
     } catch (err) {
-      console.warn('[Auth] OneSignal logout failed:', err);
+      console.warn('[Auth] push-token logout sync failed:', err);
     }
     setUser(null);
     setCurrentAuthUser(null);
