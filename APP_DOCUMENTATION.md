@@ -103,8 +103,7 @@ storefront. Seller links redirect to the seller portal on BZEAD.COM.
 - Shiprocket and Shippo services are represented in the checkout/shipping
   code and Supabase Edge Functions.
 - Firebase Cloud Messaging (FCM) is used for push-notification integration
-  (native app and browser web push). OneSignal remains a server-side fallback
-  channel for legacy web subscribers.
+  (native app and browser web push).
 - Exchange rates are fetched through the exchange-rate service and Supabase
   functions; secret API keys belong on the server.
 - Optional Google AdSense slots can be enabled using public build variables.
@@ -287,7 +286,7 @@ The functions present in the repository are not proof that every function is
 currently deployed, configured, or enabled in production. Check the linked
 Supabase project and its secrets/provider credentials before relying on one.
 Never place service-role keys, payment secrets, shipping credentials, email
-credentials, OneSignal REST credentials, or Firebase service-account private
+credentials, or Firebase service-account private
 keys in frontend build variables.
 
 ## 9. Environment variables and secrets
@@ -321,7 +320,7 @@ Other frontend configuration can include:
 
 Secrets such as Stripe secret keys, Revolut secret keys, Supabase service-role/access
 tokens, Shiprocket/Shippo credentials, email provider keys, exchange-rate API
-keys, OneSignal REST keys, and Firebase service-account credentials belong in
+keys, and Firebase service-account credentials belong in
 trusted server-side configuration (normally Supabase secrets), never in
 `VITE_*` variables. Do not commit real
 `.env` files.

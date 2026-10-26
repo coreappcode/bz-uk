@@ -1,22 +1,14 @@
-// send-push-notification edge function — dual-path delivery:
-//   Path 1: Firebase Cloud Messaging HTTP v1 (native Android/iOS app — FCM
-//           tokens registered via `register-push-token` in `device_push_tokens`)
-//   Path 2: OneSignal REST API (web push subscribers, legacy app versions)
+// send-push-notification edge function — Firebase-only delivery:
+//   Firebase Cloud Messaging HTTP v1 (Android/iOS native + web push tokens
+//   registered via `register-push-token` in `device_push_tokens`)
 //
 // Required Supabase secrets:
 //   FIREBASE_PROJECT_ID       — Firebase project id (bzead-58220)
 //   FIREBASE_CLIENT_EMAIL     — firebase-adminsdk service account email
 //   FIREBASE_PRIVATE_KEY      — service account private key (PEM)
-//   ONESIGNAL_APP_ID          — OneSignal App ID (UUID) — web push path
-//   ONESIGNAL_REST_API_KEY    — OneSignal REST API Key (os_v2_app_...)
 //
 // Targeting strategy:
-//   Native: device_push_tokens rows keyed by the authenticated Supabase user id.
-//   Web:    the client SDK (OneSignal web) tags subscriptions with
-//           external_id = profiles.id; we forward `recipientUserIds` via
-//           `include_aliases.external_id`. Native users registered on the new
-//           FCM build have no OneSignal subscription, so the two paths never
-//           double-deliver to the same device.
+//   All platforms: `device_push_tokens` rows keyed by authenticated Supabase user id.
 export {};
 
 declare const Deno: {
@@ -51,7 +43,6 @@ const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-
 const MAX_RECIPIENTS = 50;
 const MAX_TITLE_LENGTH = 120;
 const MAX_MESSAGE_LENGTH = 500;
-const ONESIGNAL_API_URL = 'https://api.onesignal.com/notifications';
 const FCM_OAUTH_URL = 'https://oauth2.googleapis.com/token';
 const FCM_SCOPE = 'https://www.googleapis.com/auth/firebase.messaging';
 
@@ -114,7 +105,7 @@ function buildDataPayload(
   orderId: string,
   metadata: Record<string, unknown>,
 ): Record<string, string> {
-  // Flat string-to-string map for OneSignal and FCM `data` parity.
+  // Flat string-to-string map for FCM `data`.
   const payload: Record<string, string> = {
     type: sanitizeText(type, 80),
     orderId,
@@ -310,62 +301,8 @@ function parseRequestBody(rawBody: unknown): PushRequestBody | null {
   };
 }
 
-interface OneSignalResponse {
-  id?: string;
-  recipients?: number;
-  errors?: unknown;
-  external_id?: string;
-}
-
-async function sendOneSignalNotification(params: {
-  appId: string;
-  restApiKey: string;
-  externalIds: string[];
-  title: string;
-  message: string;
-  data: Record<string, string>;
-}): Promise<{ success: boolean; recipients: number; errorMessage?: string }> {
-  try {
-    const response = await fetch(ONESIGNAL_API_URL, {
-      method: 'POST',
-      headers: {
-        // OneSignal v2 REST keys (os_v2_app_...) use Basic auth scheme.
-        'Authorization': `Basic ${params.restApiKey}`,
-        'Content-Type': 'application/json',
-        'Accept': 'application/json',
-      },
-      body: JSON.stringify({
-        app_id: params.appId,
-        target_channel: 'push',
-        include_aliases: { external_id: params.externalIds },
-        headings: { en: params.title },
-        contents: { en: params.message },
-        data: params.data,
-      }),
-    });
-
-    const responseText = await response.text();
-    let parsed: OneSignalResponse | null = null;
-    try { parsed = responseText ? JSON.parse(responseText) as OneSignalResponse : null; } catch { /* ignore */ }
-
-    if (!response.ok) {
-      const errorsField = (parsed as { errors?: unknown } | null)?.errors;
-      const errorMessage = Array.isArray(errorsField)
-        ? String(errorsField.join('; '))
-        : (responseText || `OneSignal HTTP ${response.status}`);
-      return { success: false, recipients: 0, errorMessage: errorMessage.slice(0, 500) };
-    }
-
-    const recipients = Number(parsed?.recipients || 0) || 0;
-    return { success: true, recipients };
-  } catch (error: unknown) {
-    const message = error instanceof Error ? error.message : 'OneSignal request failed';
-    return { success: false, recipients: 0, errorMessage: sanitizeText(message, 500) };
-  }
-}
-
 // ---------------------------------------------------------------------------
-// Firebase Cloud Messaging HTTP v1 (native app path)
+// Firebase Cloud Messaging HTTP v1
 // ---------------------------------------------------------------------------
 
 interface FcmCredentials {
@@ -551,14 +488,9 @@ Deno.serve(async (req: Request) => {
   try {
     const supabaseUrl = sanitizeText(Deno.env.get('SUPABASE_URL'), 300);
     const serviceRoleKey = sanitizeText(Deno.env.get('SUPABASE_SERVICE_ROLE_KEY'), 5000);
-    const oneSignalAppId = sanitizeText(Deno.env.get('ONESIGNAL_APP_ID'), 100);
-    const oneSignalRestApiKey = String(Deno.env.get('ONESIGNAL_REST_API_KEY') || '').trim();
 
     if (!supabaseUrl || !serviceRoleKey) {
       return json({ error: 'Server configuration error' }, 500, req);
-    }
-    if (!oneSignalAppId || !oneSignalRestApiKey) {
-      return json({ error: 'OneSignal credentials not configured' }, 500, req);
     }
 
     const senderUserId = await authenticateUser(req, supabaseUrl, serviceRoleKey);
@@ -627,68 +559,62 @@ Deno.serve(async (req: Request) => {
       }, 200, req);
     }
 
-    // ---- Path 1: FCM HTTP v1 (native Android/iOS devices) ----
-    let fcmDelivered = 0;
-    let fcmFailed = 0;
-    let fcmSkippedReason: 'credentials_not_configured' | 'no_device_tokens' | undefined;
     const fcmCreds = loadFcmCredentials();
-    if (fcmCreds) {
-      const deviceTokens = await loadDeviceTokens(adminClient, allowedRecipients);
-      if (deviceTokens.length > 0) {
-        try {
-          const accessToken = await getFcmAccessToken(fcmCreds);
-          const fcmResult = await sendFcmNotifications({
-            creds: fcmCreds,
-            accessToken,
-            tokens: deviceTokens,
-            title: parsedBody.title,
-            message: parsedBody.message,
-            data: dataPayload,
-          });
-          fcmDelivered = fcmResult.delivered;
-          fcmFailed = fcmResult.failed;
-          if (fcmResult.invalidTokens.length > 0) {
-            await pruneInvalidTokens(adminClient, fcmResult.invalidTokens);
-          }
-        } catch (error: unknown) {
-          const message = error instanceof Error ? error.message : 'FCM send failed';
-          console.error('FCM path failed', message);
-          fcmFailed += 0;
-        }
-      } else {
-        fcmSkippedReason = 'no_device_tokens';
-      }
-    } else {
-      fcmSkippedReason = 'credentials_not_configured';
+    if (!fcmCreds) {
+      return json({ error: 'FCM credentials not configured' }, 500, req);
     }
 
-    // ---- Path 2: OneSignal (web push + legacy native app versions) ----
-    const sendResult = await sendOneSignalNotification({
-      appId: oneSignalAppId,
-      restApiKey: oneSignalRestApiKey,
-      externalIds: allowedRecipients,
-      title: parsedBody.title,
-      message: parsedBody.message,
-      data: dataPayload,
-    });
+    const deviceTokens = await loadDeviceTokens(adminClient, allowedRecipients);
+    if (deviceTokens.length === 0) {
+      return json({
+        success: true,
+        requestedRecipients: parsedBody.recipientUserIds.length,
+        filteredRecipients: allowedRecipients.length,
+        recipients: 0,
+        fcm: {
+          delivered: 0,
+          failed: 0,
+          skipped: 'no_device_tokens',
+        },
+      }, 200, req);
+    }
 
-    const totalDelivered = fcmDelivered + sendResult.recipients;
+    let fcmDelivered = 0;
+    let fcmFailed = 0;
+    let fcmError: string | undefined;
+    try {
+      const accessToken = await getFcmAccessToken(fcmCreds);
+      const fcmResult = await sendFcmNotifications({
+        creds: fcmCreds,
+        accessToken,
+        tokens: deviceTokens,
+        title: parsedBody.title,
+        message: parsedBody.message,
+        data: dataPayload,
+      });
+      fcmDelivered = fcmResult.delivered;
+      fcmFailed = fcmResult.failed;
+      fcmError = fcmResult.errorMessage;
+      if (fcmResult.invalidTokens.length > 0) {
+        await pruneInvalidTokens(adminClient, fcmResult.invalidTokens);
+      }
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : 'FCM send failed';
+      console.error('FCM path failed', message);
+      fcmError = sanitizeText(message, 500);
+    }
 
     return json({
-      success: totalDelivered > 0,
+      success: fcmDelivered > 0,
       requestedRecipients: parsedBody.recipientUserIds.length,
       filteredRecipients: allowedRecipients.length,
-      recipients: totalDelivered,
+      recipients: fcmDelivered,
       fcm: {
         delivered: fcmDelivered,
         failed: fcmFailed,
-        ...(fcmSkippedReason ? { skipped: fcmSkippedReason } : {}),
+        ...(fcmError ? { error: fcmError } : {}),
       },
-      oneSignal: {
-        recipients: sendResult.recipients,
-        ...(sendResult.errorMessage ? { error: sendResult.errorMessage } : {}),
-      },
-    }, totalDelivered > 0 ? 200 : 502, req);
+    }, fcmDelivered > 0 ? 200 : 502, req);
   } catch (error: unknown) {
     const message = error instanceof Error ? error.message : 'Unexpected server error';
     return json({ error: message }, 500, req);
