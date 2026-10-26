@@ -183,6 +183,7 @@ export const BzeadHomePage: React.FC = () => {
   useEffect(() => {
     let cancelled = false;
     let lastRefreshAt = cachedSections?.cachedAt || 0;
+    let prefetchTimerId: number | null = null;
 
     const refreshSections = async () => {
       try {
@@ -236,6 +237,11 @@ export const BzeadHomePage: React.FC = () => {
 
     if (!cachedSections || !isCacheFresh(cachedSections, HOME_CONTENT_CACHE_TTL_MS)) {
       void refreshSections();
+    } else {
+      // Keep first paint fast from cache, then prefetch fresh section data shortly after.
+      prefetchTimerId = window.setTimeout(() => {
+        if (!cancelled) void refreshSections();
+      }, 2500);
     }
 
     const timerId = window.setInterval(() => {
@@ -246,6 +252,7 @@ export const BzeadHomePage: React.FC = () => {
 
     return () => {
       cancelled = true;
+      if (prefetchTimerId) window.clearTimeout(prefetchTimerId);
       window.clearInterval(timerId);
     };
   }, [cachedSections]);
@@ -253,6 +260,7 @@ export const BzeadHomePage: React.FC = () => {
   useEffect(() => {
     let cancelled = false;
     let lastRefreshAt = cachedBanners?.cachedAt || 0;
+    let prefetchTimerId: number | null = null;
 
     const refreshBanners = async () => {
       try {
@@ -287,6 +295,11 @@ export const BzeadHomePage: React.FC = () => {
 
     if (!cachedBanners || !isCacheFresh(cachedBanners, HOME_CONTENT_CACHE_TTL_MS)) {
       void refreshBanners();
+    } else {
+      // Background-refresh banners after cached render to keep ad inventory current.
+      prefetchTimerId = window.setTimeout(() => {
+        if (!cancelled) void refreshBanners();
+      }, 3000);
     }
 
     const timerId = window.setInterval(() => {
@@ -297,6 +310,7 @@ export const BzeadHomePage: React.FC = () => {
 
     return () => {
       cancelled = true;
+      if (prefetchTimerId) window.clearTimeout(prefetchTimerId);
       window.clearInterval(timerId);
     };
   }, [cachedBanners]);

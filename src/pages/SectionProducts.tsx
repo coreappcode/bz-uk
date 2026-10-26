@@ -161,10 +161,14 @@ export const SectionProducts: React.FC = () => {
       } else {
         setProducts((current) => {
           const existingIds = new Set(current.map((product) => product.id));
-          return [...current, ...(data as Product[]).filter((product) => !existingIds.has(product.id))];
+          const merged = [
+            ...current,
+            ...((data as Product[]) || []).filter((product) => !existingIds.has(product.id)),
+          ];
+          setHasMoreSearchResults(merged.length < totalCount);
+          return merged;
         });
         setSearchTotalCount(totalCount);
-        setHasMoreSearchResults(products.length + data.length < totalCount);
       }
       setLoadingMore(false);
     }

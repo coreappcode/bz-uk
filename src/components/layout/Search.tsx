@@ -153,14 +153,14 @@ export const Search: React.FC = () => {
 
   // ── Close dropdown on outside click ──
   useEffect(() => {
-    const handleOutsideClick = (event: MouseEvent) => {
+    const handleOutsidePointerDown = (event: PointerEvent) => {
       if (!containerRef.current?.contains(event.target as Node)) {
         setShowDropdown(false);
         setActiveSuggestionIndex(-1);
       }
     };
-    document.addEventListener('mousedown', handleOutsideClick);
-    return () => document.removeEventListener('mousedown', handleOutsideClick);
+    document.addEventListener('pointerdown', handleOutsidePointerDown);
+    return () => document.removeEventListener('pointerdown', handleOutsidePointerDown);
   }, []);
 
   // ── Live product suggestions ──
@@ -436,7 +436,7 @@ export const Search: React.FC = () => {
               aria-label="Search products"
               aria-autocomplete="list"
               aria-haspopup="listbox"
-              aria-expanded={showSuggestionsPanel}
+              aria-expanded={showSuggestionsPanel || showHistoryPanel}
               aria-controls="storefront-search-suggestions"
               aria-activedescendant={
                 activeSuggestionIndex >= 0
@@ -453,6 +453,7 @@ export const Search: React.FC = () => {
                   setSuggestionsStatus('idle');
                   setActiveSuggestionIndex(-1);
                   setShowDropdown(true);
+                  fetchHistory();
                   inputRef.current?.focus();
                 }}
                 className="absolute right-2 top-1/2 -translate-y-1/2 p-1 text-gray-500 hover:text-gray-800"
@@ -544,7 +545,10 @@ export const Search: React.FC = () => {
                           type="button"
                           role="option"
                           aria-selected={index === activeSuggestionIndex}
-                          onClick={() => handleSuggestionSelect(suggestion)}
+                          onMouseDown={(event) => {
+                            event.preventDefault();
+                            handleSuggestionSelect(suggestion);
+                          }}
                           className={`w-full px-3 sm:px-4 py-2.5 text-left flex items-center gap-3 transition-colors ${
                             index === activeSuggestionIndex ? 'bg-amber-50' : 'hover:bg-gray-50'
                           }`}

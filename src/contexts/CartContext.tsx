@@ -35,6 +35,52 @@ interface CartContextType {
 
 const CartContext = createContext<CartContextType | undefined>(undefined);
 
+const CART_SNAPSHOT_TTL_MS = 2 * 60 * 1000;
+const cartSnapshotKey = (userId: string) => `beauzead_cart_snapshot_v1:${userId}`;
+
+type CartSnapshot = {
+  cachedAt: number;
+  items: CartItem[];
+};
+
+const readCartSnapshot = (userId: string): CartItem[] | null => {
+  if (typeof window === 'undefined') return null;
+  try {
+    const raw = window.localStorage.getItem(cartSnapshotKey(userId));
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as CartSnapshot;
+    if (!parsed || !Array.isArray(parsed.items) || !Number.isFinite(parsed.cachedAt)) return null;
+    if (Date.now() - parsed.cachedAt > CART_SNAPSHOT_TTL_MS) return null;
+    return parsed.items.filter((item) => item && item.cartItemId && item.product?.id && item.quantity > 0);
+  } catch {
+    return null;
+  }
+};
+
+const writeCartSnapshot = (userId: string, items: CartItem[]): void => {
+  if (typeof window === 'undefined') return;
+  try {
+    const trimmed = items
+      .filter((item) => item && item.cartItemId && item.product?.id && item.quantity > 0)
+      .slice(0, 200);
+    window.localStorage.setItem(
+      cartSnapshotKey(userId),
+      JSON.stringify({ cachedAt: Date.now(), items: trimmed } satisfies CartSnapshot),
+    );
+  } catch {
+    /* ignore */
+  }
+};
+
+const clearCartSnapshot = (userId: string): void => {
+  if (typeof window === 'undefined') return;
+  try {
+    window.localStorage.removeItem(cartSnapshotKey(userId));
+  } catch {
+    /* ignore */
+  }
+};
+
 const normalizeVariantToken = (value?: string | null) => {
   const token = (value || '').trim();
   return token ? token.toLowerCase() : '-';
@@ -253,9 +299,12 @@ export const CartProvider: React.FC<{ children: React.ReactNode }> = ({ children
       });
   };
 
-  const syncCartWithBackend = useCallback(async (userId: string) => {
-    setIsLoading(true);
-    setLoadError(null);
+  const syncCartWithBackend = useCallback(async (userId: string, opts?: { silent?: boolean }) => {
+    const silent = Boolean(opts?.silent);
+    if (!silent) {
+      setIsLoading(true);
+      setLoadError(null);
+    }
 
     // Try once, on failure wait briefly and retry exactly once.
     let backendCart: CartItem[] = [];
@@ -275,20 +324,25 @@ export const CartProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
     if (lastErr) {
       console.error('Failed to sync cart with backend:', lastErr);
-      setLoadError(lastErr instanceof Error ? lastErr.message : 'Failed to load cart');
-      setIsLoading(false);
+      if (!silent) {
+        setLoadError(lastErr instanceof Error ? lastErr.message : 'Failed to load cart');
+        setIsLoading(false);
+      }
       return;
     }
 
     // DB is the sole source of truth. Replace state with DB rows, except
     // for tombstoned cartItemIds whose DELETE may still be in flight.
+    const merged = backendCart
+      .filter((item) => !pendingDeletesRef.current.has(item.cartItemId))
+      .filter((item) => item.quantity > 0);
+
     setItems(() => {
       const tombstones = pendingDeletesRef.current;
-      return backendCart
-        .filter((item) => !tombstones.has(item.cartItemId))
-        .filter((item) => item.quantity > 0);
+      return merged.filter((item) => !tombstones.has(item.cartItemId));
     });
-    setIsLoading(false);
+    writeCartSnapshot(userId, merged);
+    if (!silent) setIsLoading(false);
   }, []);
 
   // Initial load from DB on mount (and whenever auth user changes).
@@ -304,7 +358,12 @@ export const CartProvider: React.FC<{ children: React.ReactNode }> = ({ children
         setLoadError(null);
         return;
       }
-      await syncCartWithBackend(user.id);
+      const snapshot = readCartSnapshot(user.id);
+      if (snapshot && snapshot.length > 0) {
+        setItems(snapshot);
+        setIsLoading(false);
+      }
+      await syncCartWithBackend(user.id, { silent: Boolean(snapshot && snapshot.length > 0) });
     };
 
     void loadInitial();
@@ -446,6 +505,7 @@ export const CartProvider: React.FC<{ children: React.ReactNode }> = ({ children
       const { data: { user } } = await supabase.auth.getUser();
       if (user) {
         await supabase.from('cart_items').delete().eq('user_id', user.id);
+        clearCartSnapshot(user.id);
       }
     } catch {
       /* silent */

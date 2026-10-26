@@ -379,6 +379,10 @@ performance optimization, not the system of record; the backend remains
 authoritative for inventory, public price, variant, shipping, and checkout
 validation.
 
+The cart keeps Supabase `cart_items` as the source of truth, and may use a
+short-lived local snapshot only to speed up initial render before background
+backend reconciliation.
+
 ## 13. Tests and quality checks
 
 Tests live under `src/__tests__/` and run with Vitest. They cover core
