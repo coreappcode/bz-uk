@@ -1,6 +1,6 @@
 # BZEAD UK Application Documentation
 
-Last reviewed: 2026-10-21
+Last reviewed: 2026-11-08
 
 This document describes the application in this repository as implemented in
 the source, configuration, and database migrations. It also explains the
@@ -388,6 +388,37 @@ performance optimization, not the system of record; the backend remains
 authoritative for inventory, public price, variant, shipping, and checkout
 validation.
 
+### Homepage and category loading
+
+The homepage category shortcuts use the optimized WebP images in
+`public/images/category-icons/`, while category names and IDs come from
+Supabase. The shortcut query requests only active top-level categories; the
+mega menu still uses the full paginated category tree. Original PNGs remain
+available for other consumers.
+
+The hero carousel reads cached banner metadata from localStorage on repeat
+visits and refreshes it from Supabase. The active image is marked eager and
+high priority; other slides are marked lazy. Image data itself is served from
+the banner URL and is not stored in the metadata cache. Hero and homepage ad
+carousels rotate every 15 seconds when multiple banners are present; video ads
+rotate every 30 seconds. Banner images and URLs are managed in the shared
+backend, independently of frontend deployments.
+
+The category page fetches up to 500 active, approved products across the
+selected category and its descendants. It groups the loaded products by
+subcategory; selecting a subcategory filters the loaded products in the
+browser. Public prices are fetched separately for the loaded products.
+Results, counts, filters, and sorting on this page therefore apply to the
+loaded subset, not necessarily the complete catalog; server-side pagination
+and full-catalog filtering are not implemented.
+
+Local, uncommitted category-loading changes add parallel category lookups and
+lazy loading for category product images. These are not part of this
+documentation-only commit and require separate review and deployment.
+
+For observed loading measurements, asset optimization details, rollout
+guidance, and remaining work, see [homepageloading.md](./homepageloading.md).
+
 The cart keeps Supabase `cart_items` as the source of truth, and may use a
 short-lived local snapshot only to speed up initial render before background
 backend reconciliation.
@@ -431,6 +462,9 @@ environment with its configured variables.
   repository; this document records its intended regional role only.
 - Live DNS/domain ownership, Amplify rewrite configuration, and active
   production build variables are external to the repository.
+- A direct request to `/category/fashion` was observed redirecting to a URL
+  returning HTTP 404 while serving the app shell. Verify the deployed Amplify
+  SPA rewrite, including direct routes, refreshes, static assets and share pages.
 - Database migrations and Edge Function files do not establish that every
   corresponding production object is deployed or healthy.
 - Payment methods/currency support and shipping-provider availability depend

@@ -244,6 +244,32 @@ This was asset cleanup, not a demonstrated homepage speed fix.
   as the solution to the long load event. Measure first; migrating production
   requires a separate data, storage, auth and integration cutover plan.
 
+## Category-page loading
+
+The Fashion category was observed loading 1,909 active category records in
+two requests, followed by up to 500 full product records. In one direct API
+test the product response was about 2.9 MB and its URL was about 22 KB because
+descendant IDs are repeated in three filters. Timings and category sizes vary.
+
+Pending local changes (not yet committed or deployed) start the category lookup and the category-tree fetch
+concurrently. It reuses the already-fetched tree for category names instead of
+performing another names query, skips an unused exact product count, and marks
+category product images for lazy loading. The existing 500-product limit,
+product data, grouping and client-side filters remain unchanged. Failed
+category/product queries show an error instead of being presented as empty
+results, and obsolete responses from previous category navigations are ignored.
+These pending changes do not eliminate the large product response or long URL; reducing
+them safely requires a separately designed server-side API and pagination that
+preserve filters and access controls.
+
+Direct navigation to `/category/fashion` was observed redirecting to
+`/category/fashion/` with HTTP 404, even though the response included the app
+shell. Configure and verify the Amplify SPA rewrite described in
+[APP_DOCUMENTATION.md](./APP_DOCUMENTATION.md), preserving generated share
+pages and static files. This is a hosting configuration issue and was not
+changed by the frontend update. Verify direct URLs, refreshes and internal
+navigation after deployment.
+
 ## UK implementation references
 
 - `73a9d43` — asset cleanup and Apple touch icon change.
