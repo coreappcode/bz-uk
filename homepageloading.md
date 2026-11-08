@@ -119,11 +119,50 @@ transferred; it does not eliminate the Supabase request or its latency.
   sizes still determine how quickly the image itself loads. Cache entries can
   briefly show outdated banners while the refresh is pending or unavailable.
 
-The existing homepage ad-banner metadata cache is separate. This work did not
-convert or resize images already stored in Supabase, change their URLs or add
-an image transformation service. Measure their actual sizes and optimize the
-source images separately if needed; avoid changing campaign assets without
-checking quality and compatibility.
+The existing homepage ad-banner metadata cache is separate. These frontend
+changes do not automatically optimize images stored in Supabase or add an
+image transformation service. The first hero image was subsequently optimized
+separately as described below.
+
+### Production test: optimizing the first hero image
+
+A read-only audit found seven active hero banners. Their image files totaled
+approximately 12.1 MB; six PNGs were between 1.55 and 2.45 MB each. The first
+banner was a 1738 × 905 PNG of **1,783,469 bytes**. In the earlier browser
+capture, its request took approximately 22 seconds.
+
+With the user's approval, we:
+
+1. Downloaded the original and created a separate WebP with Pillow, using
+   Lanczos resizing to **1280 × 667**, quality **82**, and encoding method **6**.
+   The result was **64,080 bytes**, approximately **96.4% smaller**. The images
+   were visually compared, but visual quality and crop should still be checked
+   on the target storefront's mobile and desktop displays.
+2. Uploaded the WebP to the public `hero-banners` bucket under a **new filename**,
+   with `image/webp` and `Cache-Control: max-age=3600`. We did not overwrite
+   or delete the original PNG.
+3. Verified the new public URL returned HTTP 200, the correct content type and
+   the same bytes as the prepared file. There was no separate staging project
+   available; with explicit approval, we updated only the first active hero
+   banner record to the new URL, conditional on its original URL and position
+   remaining unchanged. The public banner API then returned the new URL.
+4. In a subsequent browser screenshot with **Disable cache** enabled, the
+   optimized banner loaded successfully in **278 ms**. This and the earlier
+   22-second request are separate observations, not a controlled benchmark;
+   network conditions and request contention may differ.
+
+The original URL remains available for rollback. To roll back, restore the
+original image URL in the banner record after confirming the record has not
+since changed; the frontend's cached metadata may briefly show the previous
+URL while refreshing. **Only the first hero banner was optimized** in this
+production test; the other six hero images were not changed.
+
+For the other storefronts, first determine whether they share this Supabase
+project and banner record. If they do, this data change may already affect
+them; do not make a duplicate change blindly. For independent banners, retain
+the originals, verify optimized copies and links in staging where possible,
+and switch one at a time with a rollback plan. Browser load times are not
+guaranteed solely by reducing file size.
 
 ## 4. Banner rotation
 
@@ -197,9 +236,9 @@ This was asset cleanup, not a demonstrated homepage speed fix.
   currently marked for lazy loading. A smaller initial selection, lazy loading
   and optimized product images may help, but should be designed and tested
   separately to preserve storefront behavior.
-- Optimize large remote hero/ad images, videos and other resources identified
-  by sorting the Network panel by size. Not all of the 104 MB was attributable
-  to the category icons.
+- Investigate and optimize the remaining six hero images, remote ad images,
+  videos and other large resources identified in the Network panel. Not all
+  of the 104 MB was attributable to the category icons.
 - The UK Supabase project was observed in Singapore. Location can add latency
   for UK visitors, but migration was **not performed** and is not established
   as the solution to the long load event. Measure first; migrating production
@@ -211,6 +250,8 @@ This was asset cleanup, not a demonstrated homepage speed fix.
 - `63a1b58` — optimized category icons, filtered category query, hero metadata
   cache, image priority hints and tests.
 - `b940e9d` — 15-second hero and ad rotation, with a hero timing test.
+- The first hero banner optimization was a **Supabase production data and
+  storage change**, not a Git commit or frontend deployment.
 
 These changes must be deployed to the relevant storefront before live
 performance can be measured. Results vary with network, device, cache state,
