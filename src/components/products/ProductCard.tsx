@@ -17,6 +17,7 @@ interface ProductCardProps {
   publicUnitPrice?: number;
   priceLoading?: boolean;
   markupMrp?: number;
+  imageLoading?: 'eager' | 'lazy';
 }
 
 export const ProductCard: React.FC<ProductCardProps> = ({
@@ -24,6 +25,7 @@ export const ProductCard: React.FC<ProductCardProps> = ({
   publicUnitPrice,
   priceLoading = false,
   markupMrp,
+  imageLoading,
 }) => {
   const { user } = useAuth();
   const { items } = useCart();
@@ -148,6 +150,7 @@ export const ProductCard: React.FC<ProductCardProps> = ({
           ref={imageRef}
           src={resolveProductDisplayImage(product)}
           alt={product.name}
+          loading={imageLoading}
           className="w-full h-full object-cover object-center transition-transform duration-300 md:group-hover:scale-105"
           onError={(e) => {
             e.currentTarget.style.opacity = '0';

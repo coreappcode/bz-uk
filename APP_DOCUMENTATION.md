@@ -412,9 +412,9 @@ Results, counts, filters, and sorting on this page therefore apply to the
 loaded subset, not necessarily the complete catalog; server-side pagination
 and full-catalog filtering are not implemented.
 
-Local, uncommitted category-loading changes add parallel category lookups and
-lazy loading for category product images. These are not part of this
-documentation-only commit and require separate review and deployment.
+The category-loading implementation runs category lookups in parallel and
+uses lazy loading for category product images. Verify the Amplify deployment
+status separately before assuming these changes are live.
 
 For observed loading measurements, asset optimization details, rollout
 guidance, and remaining work, see [homepageloading.md](./homepageloading.md).

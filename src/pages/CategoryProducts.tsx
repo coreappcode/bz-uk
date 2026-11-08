@@ -66,6 +66,7 @@ export const CategoryProducts: React.FC = () => {
   // Load category context + products
   useEffect(() => {
     if (!categoryId) return;
+    let cancelled = false;
     const load = async () => {
       setLoading(true);
       setFetchError(null);
@@ -73,6 +74,7 @@ export const CategoryProducts: React.FC = () => {
 
       try {
         const ctx = await fetchCategoryContext(categoryId);
+        if (cancelled) return;
 
         if (ctx.category) {
           setCategory(ctx.category);
@@ -80,12 +82,16 @@ export const CategoryProducts: React.FC = () => {
           setSubcategories(ctx.children);
           setParentById(ctx.parentById || {});
 
-          const { data: prods } = await fetchProducts({
+          const { data: prods, error } = await fetchProducts({
             categoryIds: ctx.allCategoryIds,
             approvalStatus: 'approved',
             isActive: true,
             limit: 500,
+            resolveCategoryNames: false,
+            includeCount: false,
           });
+          if (cancelled) return;
+          if (error) throw new Error(error);
 
           // Enrich products with resolved category names
           const enriched = (prods || []).map((p: any) => ({
@@ -101,6 +107,7 @@ export const CategoryProducts: React.FC = () => {
           setProducts([]);
         }
       } catch (err) {
+        if (cancelled) return;
         console.error('Error loading category:', err);
         setFetchError('Failed to load products. Please try again.');
         setCategory(null);
@@ -108,12 +115,14 @@ export const CategoryProducts: React.FC = () => {
         setProducts([]);
       }
 
-      setLoading(false);
+      if (!cancelled) setLoading(false);
     };
-    load();
+    void load();
+    return () => { cancelled = true; };
   }, [categoryId]);
 
   useEffect(() => {
+    let cancelled = false;
     const loadPublicPrices = async () => {
       if (!selectedCountry) {
         setPublicPriceMap({});
@@ -130,10 +139,12 @@ export const CategoryProducts: React.FC = () => {
       }
 
       setPublicPriceLoading(true);
-      const { data } = await fetchPublicProductPrices(
+      const { data, error } = await fetchPublicProductPrices(
         products.map((p) => p.id),
         selectedCountry
       );
+      if (cancelled) return;
+      if (error) console.error('Failed to load category product prices:', error);
 
       const map: Record<string, number> = {};
       const mrpMap: Record<string, number> = {};
@@ -148,6 +159,7 @@ export const CategoryProducts: React.FC = () => {
     };
 
     void loadPublicPrices();
+    return () => { cancelled = true; };
   }, [products, selectedCountry]);
 
   // Compute dynamic price ceiling from loaded products
@@ -681,6 +693,7 @@ export const CategoryProducts: React.FC = () => {
                             <ProductCard
                               key={`${section.subcategory.id}-${product.id}`}
                               product={product}
+                              imageLoading="lazy"
                               publicUnitPrice={publicPriceMap[product.id]}
                               markupMrp={publicMrpMap[product.id]}
                               priceLoading={publicPriceLoading}
@@ -710,6 +723,7 @@ export const CategoryProducts: React.FC = () => {
                             <ProductCard
                               key={`other-${product.id}`}
                               product={product}
+                              imageLoading="lazy"
                               publicUnitPrice={publicPriceMap[product.id]}
                               markupMrp={publicMrpMap[product.id]}
                               priceLoading={publicPriceLoading}
@@ -731,6 +745,7 @@ export const CategoryProducts: React.FC = () => {
                       <ProductCard
                         key={product.id}
                         product={product}
+                        imageLoading="lazy"
                         publicUnitPrice={publicPriceMap[product.id]}
                         markupMrp={publicMrpMap[product.id]}
                         priceLoading={publicPriceLoading}

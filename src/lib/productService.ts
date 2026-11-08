@@ -145,8 +145,13 @@ export async function fetchProducts(filters?: {
   limit?: number;
   offset?: number;
   excludeDrafts?: boolean;
+  resolveCategoryNames?: boolean;
+  includeCount?: boolean;
 }) {
-  let query = supabase.from('products').select('*', { count: 'exact' });
+  let query = supabase.from('products').select(
+    '*',
+    filters?.includeCount === false ? undefined : { count: 'exact' },
+  );
 
   if (filters?.sellerId) query = query.eq('seller_id', filters.sellerId);
 
@@ -195,7 +200,7 @@ export async function fetchProducts(filters?: {
   const products = data || [];
   if (products.length > 0) {
     const catIds = [...new Set(products.flatMap((p: any) => [p.category, p.sub_category, p.product_type]).filter(Boolean))];
-    if (catIds.length > 0) {
+    if (catIds.length > 0 && filters?.resolveCategoryNames !== false) {
       const { data: cats } = await supabase
         .from('categories')
         .select('id, name')
@@ -705,20 +710,20 @@ export async function fetchCategoryBySlug(slug: string) {
 export async function fetchCategoryContext(slugOrId: string) {
   const isUUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(slugOrId);
 
-  // 1. Get the target category
-  let catData: any = null;
-  if (isUUID) {
-    const res = await fetchCategoryById(slugOrId);
-    catData = res.data;
-  } else {
-    const res = await fetchCategoryBySlug(slugOrId);
-    catData = res.data;
-  }
+  // The target may be inactive, so resolve it separately from the active tree.
+  const [categoryResult, categoriesResult] = await Promise.all([
+    supabase
+      .from('categories')
+      .select('id, name, slug, parent_id, level, display_order, is_active')
+      .eq(isUUID ? 'id' : 'slug', slugOrId)
+      .maybeSingle(),
+    fetchCategoriesFlat(),
+  ]);
+  if (categoryResult.error) throw new Error(categoryResult.error.message);
+  if (categoriesResult.error) throw new Error(categoriesResult.error);
+  const catData = categoryResult.data;
   if (!catData) return { category: null, parent: null, children: [], allCategoryIds: [], parentById: {} };
-
-  // 2. Get all categories (flat) in one query
-  const { data: allCats } = await fetchCategoriesFlat();
-  const flatCats = allCats || [];
+  const flatCats = categoriesResult.data;
 
   // 3. Find parent for breadcrumb
   let parent: any = null;

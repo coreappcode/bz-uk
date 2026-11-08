@@ -251,16 +251,17 @@ two requests, followed by up to 500 full product records. In one direct API
 test the product response was about 2.9 MB and its URL was about 22 KB because
 descendant IDs are repeated in three filters. Timings and category sizes vary.
 
-Pending local changes (not yet committed or deployed) start the category lookup and the category-tree fetch
-concurrently. It reuses the already-fetched tree for category names instead of
+The category-loading implementation starts the category lookup and the
+category-tree fetch concurrently. It reuses the already-fetched tree for category names instead of
 performing another names query, skips an unused exact product count, and marks
 category product images for lazy loading. The existing 500-product limit,
 product data, grouping and client-side filters remain unchanged. Failed
 category/product queries show an error instead of being presented as empty
 results, and obsolete responses from previous category navigations are ignored.
-These pending changes do not eliminate the large product response or long URL; reducing
+These changes do not eliminate the large product response or long URL; reducing
 them safely requires a separately designed server-side API and pagination that
-preserve filters and access controls.
+preserve filters and access controls. Verify the Amplify deployment status
+separately before assuming these changes are live.
 
 Direct navigation to `/category/fashion` was observed redirecting to
 `/category/fashion/` with HTTP 404, even though the response included the app
