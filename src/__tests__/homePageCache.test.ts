@@ -4,8 +4,10 @@ import {
   HOME_PRICE_CACHE_TTL_MS,
   isCacheFresh,
   readHomePricesCache,
+  readHomeHeroBannersCache,
   readHomeSectionsCache,
   writeHomePricesCache,
+  writeHomeHeroBannersCache,
   writeHomeSectionsCache,
 } from '../lib/homePageCache';
 
@@ -28,6 +30,20 @@ describe('home page cache', () => {
     const cached = readHomeSectionsCache();
     expect(cached?.value).toEqual(sections);
     expect(cached && isCacheFresh(cached, HOME_CONTENT_CACHE_TTL_MS)).toBe(true);
+  });
+
+  it('stores and restores hero banner metadata', () => {
+    const banners = [{ id: 'hero-1', image: 'https://example.com/banner.jpg', alt: 'Offer', link: '/offer' }];
+    writeHomeHeroBannersCache(banners);
+    expect(readHomeHeroBannersCache()?.value).toEqual(banners);
+  });
+
+  it('rejects invalid hero banner metadata', () => {
+    writeHomeHeroBannersCache([{ id: 'hero-1', image: 'https://example.com/banner.jpg', alt: 'Offer', link: '/offer' }]);
+    const key = Object.keys(localStorage).find((item) => item.startsWith('beauzead_home_hero_banners_v1:'));
+    expect(key).toBeDefined();
+    localStorage.setItem(key!, JSON.stringify({ cachedAt: Date.now(), value: [{ id: 'hero-1' }] }));
+    expect(readHomeHeroBannersCache()).toBeNull();
   });
 
   it('reuses cached home prices per product only for the matching market country', () => {

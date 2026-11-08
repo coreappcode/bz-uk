@@ -102,43 +102,44 @@ const CategoryItem: React.FC<{ category: CategoryItem; isMore?: boolean }> = ({
 };
 
 const imageMap: { [key: string]: string } = {
-  'Electronics': '/images/ELECTRONICS.png',
-  'Fashion': '/images/FASHION.png',
-  'Beauty & Health': '/images/BEAUTY_AND_PERSONAL_CARE.png',
-  'Beauty & Personal Care': '/images/BEAUTY_AND_PERSONAL_CARE.png',
-  'Home & Garden': '/images/HOME_AND_GARDEN.png',
-  'Grocery': '/images/Grocery.png',
-  'Grocery & Gourmet Food': '/images/GROCERY_AND_GOURMET_FOOD.png',
-  'Grocery & Gourmet': '/images/GROCERY_AND_GOURMET_FOOD.png',
-  'Health, Household & Baby Care': '/images/HEALTH_HOUSEHOLD_AND_BABY_CARE.png',
-  'Health, Household & Baby': '/images/HEALTH_HOUSEHOLD_AND_BABY_CARE.png',
-  'Sports & Outdoors': '/images/SPORTS_AND_OUTDOORS.png',
-  'Sports, Fitness & Outdoors': '/images/SPORTS_AND_OUTDOORS.png',
-  'Books': '/images/BOOKS.png',
-  'Books & Media': '/images/BOOKS.png',
-  'Toys, Games & Baby Products': '/images/TOYS_GAMES_AND_BABY_PRODUCTS.png',
-  'Toys & Baby': '/images/TOYS_GAMES_AND_BABY_PRODUCTS.png',
-  'Automotive & Industrial': '/images/AUTOMOTIVE_AND_INDUSTRIAL.png',
-  'Automotive': '/images/AUTOMOTIVE_AND_INDUSTRIAL.png',
-  'Jewellery & Luxury': '/images/JEWELLERY_AND_LUXURY.png',
-  'Medical Equipment & Supplies': '/images/MEDICAL_EQUIPMENT_AND_SUPPLIES.png',
-  'Safety & PPE': '/images/SAFETY_AND_PPE.png',
-  'Software & Digital Products': '/images/SOFTWARE_AND_DIGITAL_PRODUCTS.png',
-  'Industrial & Lab Supplies': '/images/INDUSTRIAL_AND_LAB_SUPPLIES.png',
-  'Office Supplies & Stationery': '/images/OFFICE_SUPPLIES_AND_STATIONERY.png',
-  'Gifts & Celebrations': '/images/GIFTS_AND_CELEBRATIONS.png',
-  'Combo Offers': '/images/COMBO_OFFERS.png',
-  'Home Appliances': '/images/HOME_APPLIANCES.png',
-  'Musical Instruments': '/images/MUSICAL_INSTRUMENTS.png',
-  'Garden & Outdoor Living': '/images/GARDEN_AND_OUTDOOR_LIVING.png',
-  'Travel & Luggage': '/images/TRAVEL_AND_LUGGAGE.png',
+  'Electronics': '/images/category-icons/ELECTRONICS.webp',
+  'Fashion': '/images/category-icons/FASHION.webp',
+  'Beauty & Health': '/images/category-icons/BEAUTY_AND_PERSONAL_CARE.webp',
+  'Beauty & Personal Care': '/images/category-icons/BEAUTY_AND_PERSONAL_CARE.webp',
+  'Home & Garden': '/images/category-icons/HOME_AND_GARDEN.webp',
+  'Grocery': '/images/category-icons/Grocery.webp',
+  'Grocery & Gourmet Food': '/images/category-icons/GROCERY_AND_GOURMET_FOOD.webp',
+  'Grocery & Gourmet': '/images/category-icons/GROCERY_AND_GOURMET_FOOD.webp',
+  'Health, Household & Baby Care': '/images/category-icons/HEALTH_HOUSEHOLD_AND_BABY_CARE.webp',
+  'Health, Household & Baby': '/images/category-icons/HEALTH_HOUSEHOLD_AND_BABY_CARE.webp',
+  'Sports & Outdoors': '/images/category-icons/SPORTS_AND_OUTDOORS.webp',
+  'Sports, Fitness & Outdoors': '/images/category-icons/SPORTS_AND_OUTDOORS.webp',
+  'Books': '/images/category-icons/BOOKS.webp',
+  'Books & Media': '/images/category-icons/BOOKS.webp',
+  'Toys, Games & Baby Products': '/images/category-icons/TOYS_GAMES_AND_BABY_PRODUCTS.webp',
+  'Toys & Baby': '/images/category-icons/TOYS_GAMES_AND_BABY_PRODUCTS.webp',
+  'Automotive & Industrial': '/images/category-icons/AUTOMOTIVE_AND_INDUSTRIAL.webp',
+  'Automotive': '/images/category-icons/AUTOMOTIVE_AND_INDUSTRIAL.webp',
+  'Jewellery & Luxury': '/images/category-icons/JEWELLERY_AND_LUXURY.webp',
+  'Medical Equipment & Supplies': '/images/category-icons/MEDICAL_EQUIPMENT_AND_SUPPLIES.webp',
+  'Safety & PPE': '/images/category-icons/SAFETY_AND_PPE.webp',
+  'Software & Digital Products': '/images/category-icons/SOFTWARE_AND_DIGITAL_PRODUCTS.webp',
+  'Industrial & Lab Supplies': '/images/category-icons/INDUSTRIAL_AND_LAB_SUPPLIES.webp',
+  'Office Supplies & Stationery': '/images/category-icons/OFFICE_SUPPLIES_AND_STATIONERY.webp',
+  'Gifts & Celebrations': '/images/category-icons/GIFTS_AND_CELEBRATIONS.webp',
+  'Combo Offers': '/images/category-icons/COMBO_OFFERS.webp',
+  'Home Appliances': '/images/category-icons/HOME_APPLIANCES.webp',
+  'Musical Instruments': '/images/category-icons/MUSICAL_INSTRUMENTS.webp',
+  'Garden & Outdoor Living': '/images/category-icons/GARDEN_AND_OUTDOOR_LIVING.webp',
+  'Travel & Luggage': '/images/category-icons/TRAVEL_AND_LUGGAGE.webp',
 };
 
 export const Categories: React.FC = () => {
   const [categories, setCategories] = useState<CategoryItem[]>([]);
 
   useEffect(() => {
-    fetchCategories().then(({ data }) => {
+    fetchCategories().then(({ data, error }) => {
+      if (error) console.error('Failed to load homepage categories:', error);
       setCategories(
         data.map((c: any) => ({
           id: c.id,

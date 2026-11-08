@@ -609,7 +609,7 @@ export interface CategoryNode {
  * Fetch all active categories as a flat list.
  * Frontend builds the tree from parent_id relationships.
  */
-export async function fetchCategoriesFlat(activeOnly = true) {
+export async function fetchCategoriesFlat(activeOnly = true, level?: number) {
   // PostgREST caps a single response at 1000 rows. The category tree has more
   // than that, so page through with .range() until we've pulled every row —
   // otherwise sub-categories/product types past row 1000 silently disappear.
@@ -625,6 +625,7 @@ export async function fetchCategoriesFlat(activeOnly = true) {
       .order('display_order')
       .range(from, from + pageSize - 1);
     if (activeOnly) query = query.eq('is_active', true);
+    if (level !== undefined) query = query.eq('level', level);
     const { data, error } = await query;
     if (error) return { data: all, error: error.message };
     const batch = data || [];
@@ -673,7 +674,7 @@ export async function fetchCategoryTree() {
  * Legacy compatibility: fetchCategories returns level-1 categories only.
  */
 export async function fetchCategories(activeOnly = true) {
-  const { data, error } = await fetchCategoriesFlat(activeOnly);
+  const { data, error } = await fetchCategoriesFlat(activeOnly, 1);
   if (error) return { data: [], error };
   const level1 = (data as CategoryNode[]).filter(c => c.level === 1);
   return { data: level1, error: null };

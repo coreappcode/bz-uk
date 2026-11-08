@@ -1,11 +1,13 @@
 import React, { useState, useEffect } from 'react';
 import { ChevronLeft, ChevronRight } from 'lucide-react';
 import { supabase } from '../../lib/supabase';
+import { readHomeHeroBannersCache, writeHomeHeroBannersCache, type HomeHeroBanner } from '../../lib/homePageCache';
 
 export const HeroCarousel: React.FC = () => {
+  const [cachedBanners] = useState(readHomeHeroBannersCache);
   const [currentSlide, setCurrentSlide] = useState(0);
-  const [banners, setBanners] = useState<{ id: string; image: string; alt: string; link: string }[]>([]);
-  const [loaded, setLoaded] = useState(false);
+  const [banners, setBanners] = useState<HomeHeroBanner[]>(() => cachedBanners?.value || []);
+  const [loaded, setLoaded] = useState(Boolean(cachedBanners));
 
   useEffect(() => {
     let cancelled = false;
@@ -16,15 +18,20 @@ export const HeroCarousel: React.FC = () => {
       .eq('is_active', true)
       .eq('banner_type', 'hero')
       .order('position', { ascending: true })
-      .then(({ data }) => {
+      .then(({ data, error }) => {
         if (cancelled) return;
-        if (data && data.length > 0) {
-          setBanners(data.map((b) => ({
+        if (error) {
+          console.error('Failed to load hero banners:', error);
+        } else {
+          const nextBanners = (data || []).map((b) => ({
             id: b.id,
             image: b.image_url,
             alt: b.title,
             link: b.link || '',
-          })));
+          }));
+          setBanners(nextBanners);
+          setCurrentSlide((current) => Math.min(current, Math.max(nextBanners.length - 1, 0)));
+          writeHomeHeroBannersCache(nextBanners);
         }
         setLoaded(true);
       });
@@ -55,11 +62,14 @@ export const HeroCarousel: React.FC = () => {
     });
   };
 
-  const renderSlideImage = (banner: { id: string; image: string; alt: string; link: string }) => {
+  const renderSlideImage = (banner: HomeHeroBanner, index: number) => {
     const img = (
       <img
         src={banner.image}
         alt={banner.alt}
+        loading={index === currentSlide ? 'eager' : 'lazy'}
+        fetchPriority={index === currentSlide ? 'high' : 'low'}
+        decoding="async"
         className="h-full w-full object-cover object-center"
         onError={() => removeBrokenBanner(banner.id)}
       />
@@ -97,9 +107,9 @@ export const HeroCarousel: React.FC = () => {
               className="flex h-full w-full transition-transform duration-500 ease-in-out"
               style={{ transform: `translateX(-${currentSlide * 100}%)` }}
             >
-              {banners.map((banner) => (
+              {banners.map((banner, index) => (
                 <div key={banner.id} className="h-full w-full flex-shrink-0">
-                  {renderSlideImage(banner)}
+                  {renderSlideImage(banner, index)}
                 </div>
               ))}
             </div>

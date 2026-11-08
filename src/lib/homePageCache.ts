@@ -15,6 +15,13 @@ export interface HomePageBanner {
   adSlot: number;
 }
 
+export interface HomeHeroBanner {
+  id: string;
+  image: string;
+  alt: string;
+  link: string;
+}
+
 export interface HomePagePrices {
   productIds: string[];
   sellingPrices: Record<string, number>;
@@ -35,6 +42,7 @@ const HOME_PRICE_CACHE_MAX_PRODUCTS = 500;
 const MARKET_KEY = import.meta.env.VITE_MARKET || 'GLOBAL';
 const SECTIONS_CACHE_KEY = `beauzead_home_sections_v1:${MARKET_KEY}`;
 const BANNERS_CACHE_KEY = `beauzead_home_banners_v1:${MARKET_KEY}`;
+const HERO_BANNERS_CACHE_KEY = `beauzead_home_hero_banners_v1:${MARKET_KEY}`;
 
 function readCache<T>(key: string): CacheEntry<T> | null {
   if (typeof window === 'undefined') return null;
@@ -99,6 +107,19 @@ export function readHomeBannersCache(): CacheEntry<HomePageBanner[]> | null {
 
 export function writeHomeBannersCache(value: HomePageBanner[]): void {
   writeCache(BANNERS_CACHE_KEY, value);
+}
+
+export function readHomeHeroBannersCache(): CacheEntry<HomeHeroBanner[]> | null {
+  const cached = readCache<HomeHeroBanner[]>(HERO_BANNERS_CACHE_KEY);
+  if (!cached || !Array.isArray(cached.value) || !cached.value.every((banner) =>
+    banner && typeof banner.id === 'string' && typeof banner.image === 'string'
+    && typeof banner.alt === 'string' && typeof banner.link === 'string'
+  )) return null;
+  return cached;
+}
+
+export function writeHomeHeroBannersCache(value: HomeHeroBanner[]): void {
+  writeCache(HERO_BANNERS_CACHE_KEY, value);
 }
 
 const priceCacheKey = (country: string): string =>
