@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { HeroCarousel } from '../components/layout/HeroCarousel';
 import { writeHomeHeroBannersCache } from '../lib/homePageCache';
@@ -53,6 +53,27 @@ describe('hero carousel', () => {
       expect(screen.getByAltText('Cached offer')).toBeInTheDocument();
     } finally {
       consoleError.mockRestore();
+    }
+  });
+
+  it('rotates hero banners after 15 seconds, not before', () => {
+    vi.useFakeTimers();
+    try {
+      writeHomeHeroBannersCache([
+        { id: 'first', image: '/first.jpg', alt: 'First', link: '' },
+        { id: 'second', image: '/second.jpg', alt: 'Second', link: '' },
+      ]);
+      order.mockReturnValue(new Promise(() => {}));
+      const { unmount } = render(<HeroCarousel />);
+
+      expect(screen.getByAltText('First')).toHaveAttribute('loading', 'eager');
+      act(() => vi.advanceTimersByTime(14999));
+      expect(screen.getByAltText('First')).toHaveAttribute('loading', 'eager');
+      act(() => vi.advanceTimersByTime(1));
+      expect(screen.getByAltText('Second')).toHaveAttribute('loading', 'eager');
+      unmount();
+    } finally {
+      vi.useRealTimers();
     }
   });
 });

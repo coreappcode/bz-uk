@@ -49,13 +49,13 @@ const AdBanner: React.FC<{ src: string; alt: string; link?: string }> = ({ src, 
   return link ? <a href={link}>{img}</a> : img;
 };
 
-/** Auto-rotating ad banner carousel — rotates every 7s if more than one banner */
+/** Auto-rotating ad banner carousel — rotates every 15s if more than one banner */
 const AdBannerCarousel: React.FC<{ banners: { id: string; src: string; alt: string; link?: string }[] }> = ({ banners }) => {
   const [current, setCurrent] = useState(0);
 
   useEffect(() => {
     if (banners.length <= 1) return;
-    const timer = setInterval(() => setCurrent((p) => (p + 1) % banners.length), 7000);
+    const timer = setInterval(() => setCurrent((p) => (p + 1) % banners.length), 15000);
     return () => clearInterval(timer);
   }, [banners.length]);
 

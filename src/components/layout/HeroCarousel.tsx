@@ -42,7 +42,7 @@ export const HeroCarousel: React.FC = () => {
     if (banners.length <= 1) return;
     const interval = setInterval(() => {
       setCurrentSlide((prev) => (prev + 1) % banners.length);
-    }, 5000);
+    }, 15000);
     return () => clearInterval(interval);
   }, [banners.length]);
 
