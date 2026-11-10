@@ -1,3 +1,4 @@
+import { cachedQuery, QUERY_TTL } from './queryCache';
 import { supabase } from './supabase';
 
 export interface PublicProductPrice {
@@ -161,7 +162,25 @@ export async function fetchVerifiedVariantPrices(
   return { data: pricesByKey, error: null };
 }
 
-export async function fetchPublicProductPrices(
+export function fetchPublicProductPrices(
+  productIds: string[],
+  country?: string | null,
+  priceOverrides?: Record<string, number>,
+) {
+  const ids = Array.from(new Set(productIds.filter(Boolean))).sort();
+  const overrides = priceOverrides
+    ? Object.entries(priceOverrides).sort(([a], [b]) => a.localeCompare(b))
+    : [];
+  const key = `prices:${(country || '').trim().toUpperCase()}:${ids.join(',')}:${JSON.stringify(overrides)}`;
+  return cachedQuery(
+    key,
+    QUERY_TTL.prices,
+    () => fetchPublicProductPricesUncached(productIds, country, priceOverrides),
+    (result) => !result.error,
+  );
+}
+
+async function fetchPublicProductPricesUncached(
   productIds: string[],
   country?: string | null,
   priceOverrides?: Record<string, number>,

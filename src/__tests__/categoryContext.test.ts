@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { fetchCategoryContext } from '../lib/productService';
+import { clearQueryCache } from '../lib/queryCache';
 
 const { categoryLookup, categoryPage } = vi.hoisted(() => ({
   categoryLookup: vi.fn(),
@@ -29,6 +30,7 @@ vi.mock('../lib/notificationService', () => ({
 
 describe('category context', () => {
   beforeEach(() => {
+    clearQueryCache();
     categoryLookup.mockReset();
     categoryPage.mockReset();
   });

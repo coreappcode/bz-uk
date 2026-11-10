@@ -17,6 +17,8 @@ import {
   fetchVerifiedVariantPrices,
   type CheckoutPricingResult,
 } from '../../lib/pricingService';
+import { clearQueryCache } from '../../lib/queryCache';
+import { fetchProductById } from '../../lib/productService';
 import { useDestinationCountry } from '../../hooks/useDestinationCountry';
 import { isNativePlatform } from '../../mobile/nativePlatform';
 
@@ -28,6 +30,7 @@ export const CartPage: React.FC = () => {
   const toast = useToast();
   const navigate = useNavigate();
   const [loading, setLoading] = useState(true);
+  const [checkingOut, setCheckingOut] = useState(false);
   const [updatingId, setUpdatingId] = useState<string | null>(null);
   const [pricing, setPricing] = useState<CheckoutPricingResult | null>(null);
   const [pricingLoading, setPricingLoading] = useState(false);
@@ -261,7 +264,7 @@ export const CartPage: React.FC = () => {
       || typeof pricingByProductId.get(item.product.id)?.publicUnitPrice === 'number'
       || typeof item.product.price === 'number';
   }) && !variantPriceError;
-  const handleCheckout = () => {
+  const handleCheckout = async () => {
     if (selectedCartItems.length === 0) {
       alert('PLEASE SELECT ANY ITEM TO PROCEED');
       return;
@@ -270,8 +273,27 @@ export const CartPage: React.FC = () => {
       alert('Please wait for final prices to load.');
       return;
     }
+    // Bypass cached data: re-read stock and prices from the database before checkout.
+    if (checkingOut) return;
+    setCheckingOut(true);
+    clearQueryCache();
+    let liveStock = new Map<string, number>();
+    try {
+      const results = await Promise.all(
+        Array.from(new Set(selectedCartItems.map((item) => item.product.id)))
+          .map(async (id) => [id, (await fetchProductById(id)).data?.stock] as const),
+      );
+      liveStock = new Map(results.filter(([, stock]) => typeof stock === 'number') as [string, number][]);
+      await fetchPublicProductPrices(Array.from(liveStock.keys()), selectedCountry);
+    } catch (error) {
+      console.error('[Cart] Unable to refresh checkout data:', error);
+    } finally {
+      setCheckingOut(false);
+    }
     // M1: Block checkout if any selected item is out of stock
-    const outOfStock = selectedCartItems.filter((item) => item.product.stock <= 0);
+    const outOfStock = selectedCartItems.filter(
+      (item) => (liveStock.get(item.product.id) ?? item.product.stock) <= 0,
+    );
     if (outOfStock.length > 0) {
       alert(`These items are out of stock: ${outOfStock.map((i) => i.product.name).join(', ')}. Please remove them to continue.`);
       return;
@@ -565,10 +587,10 @@ export const CartPage: React.FC = () => {
 
                 <button
                   onClick={handleCheckout}
-                  disabled={!hasResolvedSelectedPrices || wishlistMovingId !== null}
+                  disabled={!hasResolvedSelectedPrices || wishlistMovingId !== null || checkingOut}
                   className="w-full mt-3 py-3 bg-[#ffd814] border border-[#fcd200] rounded-[10px] text-[15px] font-bold text-[#0f1111] cursor-pointer hover:bg-[#f7ca00] active:bg-[#e8b800] transition-colors"
                 >
-                  Proceed to Checkout →
+                  {checkingOut ? 'Checking latest prices…' : 'Proceed to Checkout →'}
                 </button>
 
                 <p className="hidden text-center text-[12px] text-[#067d62] mt-2.5 md:block">

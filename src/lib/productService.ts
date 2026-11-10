@@ -1,4 +1,5 @@
 import { supabase } from './supabase';
+import { cachedQuery, clearQueryCache, QUERY_TTL } from './queryCache';
 import { notifyAccountEvent, notifyAdminsOfEvent } from './notificationService';
 
 // Detects RLS / auth.uid()-mismatch failures on inserts/updates. When this
@@ -135,7 +136,16 @@ function buildProductSlug(rawValue: string, fallbackPrefix = 'product') {
 
 // ---------- FETCH ----------
 
-export async function fetchProducts(filters?: {
+export function fetchProducts(...args: Parameters<typeof fetchProductsUncached>) {
+  const filters = args[0];
+  // Only public storefront listings are cached; seller/admin/search views stay live.
+  const isPublicListing = !!filters && filters.approvalStatus === 'approved' && filters.isActive === true
+    && !filters.sellerId && !filters.search;
+  if (!isPublicListing) return fetchProductsUncached(...args);
+  return cachedQuery(`products:${JSON.stringify(filters)}`, QUERY_TTL.products, () => fetchProductsUncached(...args), (r) => !r.error);
+}
+
+async function fetchProductsUncached(filters?: {
   sellerId?: string;
   category?: string;
   categoryIds?: string[];
@@ -244,7 +254,11 @@ export async function fetchProducts(filters?: {
   return { data: products, error: error?.message || null, count: count || 0 };
 }
 
-export async function fetchCategoryMaxPrice(categoryIds: string[]) {
+export function fetchCategoryMaxPrice(...args: Parameters<typeof fetchCategoryMaxPriceUncached>) {
+  return cachedQuery(`maxprice:${[...args[0]].sort().join(',')}`, QUERY_TTL.categories, () => fetchCategoryMaxPriceUncached(...args), (r) => !r.error);
+}
+
+async function fetchCategoryMaxPriceUncached(categoryIds: string[]) {
   const { data, error } = await supabase
     .from('products')
     .select('price')
@@ -332,7 +346,12 @@ export async function searchPublicProductsByKeywords(
   };
 }
 
-export async function fetchProductById(id: string, options?: { includeUnapproved?: boolean }) {
+export function fetchProductById(...args: Parameters<typeof fetchProductByIdUncached>) {
+  if (args[1]?.includeUnapproved) return fetchProductByIdUncached(...args);
+  return cachedQuery(`product:${(args[0] || '').trim()}`, QUERY_TTL.product, () => fetchProductByIdUncached(...args), (r) => !r.error && !!r.data);
+}
+
+async function fetchProductByIdUncached(id: string, options?: { includeUnapproved?: boolean }) {
   const ref = (id || '').trim();
   const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(ref);
   const isPublicProductId = /^BZD\d{9}$/i.test(ref);
@@ -400,7 +419,11 @@ export async function fetchProductById(id: string, options?: { includeUnapproved
   return { data, error: error?.message || null };
 }
 
-export async function fetchProductReviews(productId: string) {
+export function fetchProductReviews(...args: Parameters<typeof fetchProductReviewsUncached>) {
+  return cachedQuery(`reviews:${args[0]}`, QUERY_TTL.product, () => fetchProductReviewsUncached(...args), (r) => !r.error);
+}
+
+async function fetchProductReviewsUncached(productId: string) {
   const { data: reviewRows, error } = await supabase
     .from('reviews')
     .select('*')
@@ -449,7 +472,11 @@ function shuffleWithSeed<T>(items: T[], seed: string): T[] {
   return copy;
 }
 
-export async function fetchSimilarProducts(
+export function fetchSimilarProducts(...args: Parameters<typeof fetchSimilarProductsUncached>) {
+  return cachedQuery(`similar:${JSON.stringify(args)}`, QUERY_TTL.products, () => fetchSimilarProductsUncached(...args), (r: any) => !r?.error);
+}
+
+async function fetchSimilarProductsUncached(
   category: string,
   excludeId: string,
   limit = 8,
@@ -646,11 +673,15 @@ export interface CategoryNode {
   children?: CategoryNode[];
 }
 
+export function fetchCategoriesFlat(...args: Parameters<typeof fetchCategoriesFlatUncached>) {
+  return cachedQuery(`categories:${args[0] ?? true}:${args[1] ?? 'all'}`, QUERY_TTL.categories, () => fetchCategoriesFlatUncached(...args), (r) => !r.error);
+}
+
 /**
  * Fetch all active categories as a flat list.
  * Frontend builds the tree from parent_id relationships.
  */
-export async function fetchCategoriesFlat(activeOnly = true, level?: number) {
+async function fetchCategoriesFlatUncached(activeOnly = true, level?: number) {
   // PostgREST caps a single response at 1000 rows. The category tree has more
   // than that, so page through with .range() until we've pulled every row —
   // otherwise sub-categories/product types past row 1000 silently disappear.
@@ -739,11 +770,15 @@ export async function fetchCategoryBySlug(slug: string) {
   return { data, error: error?.message || null };
 }
 
+export function fetchCategoryContext(...args: Parameters<typeof fetchCategoryContextUncached>) {
+  return cachedQuery(`catctx:${args[0]}`, QUERY_TTL.categories, () => fetchCategoryContextUncached(...args), (r) => !!r.category);
+}
+
 /**
  * Fetch full category context: the category itself, its parent (breadcrumb), and its children (subcategory nav).
  * Also collects all descendant IDs for product fetching.
  */
-export async function fetchCategoryContext(slugOrId: string) {
+async function fetchCategoryContextUncached(slugOrId: string) {
   const isUUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(slugOrId);
 
   // The target may be inactive, so resolve it separately from the active tree.
@@ -792,6 +827,7 @@ export async function fetchCategoryContext(slugOrId: string) {
 }
 
 export async function createCategory(cat: { name: string; slug: string; parent_id?: string | null; level?: number; display_order?: number }) {
+  clearQueryCache();
   const { data, error } = await supabase
     .from('categories')
     .insert({
@@ -807,6 +843,7 @@ export async function createCategory(cat: { name: string; slug: string; parent_i
 }
 
 export async function updateCategory(id: string, updates: { name?: string; slug?: string; is_active?: boolean; display_order?: number }) {
+  clearQueryCache();
   const { data, error } = await supabase
     .from('categories')
     .update(updates)
@@ -817,6 +854,7 @@ export async function updateCategory(id: string, updates: { name?: string; slug?
 }
 
 export async function deleteCategory(id: string) {
+  clearQueryCache();
   const { error } = await supabase.from('categories').delete().eq('id', id);
   return { success: !error, error: error?.message || null };
 }
@@ -834,6 +872,7 @@ export async function fetchCountries() {
 // ---------- CREATE ----------
 
 export async function createProduct(productData: Record<string, unknown>) {
+  clearQueryCache();
   const sizeVariants = (productData.sizeVariants || productData.size_variants || []) as Record<string, unknown>[];
   const colorVariants = (productData.colorVariants || productData.color_variants || []) as Record<string, unknown>[];
   const variantCombinations = (productData.variantCombinations || productData.variant_combinations || []) as Record<string, unknown>[];
@@ -1389,6 +1428,7 @@ export function checkProductMissingFields(product: {
 }
 
 export async function approveProduct(id: string) {
+  clearQueryCache();
   // Fetch the product first and validate required fields
   const { data: product, error: fetchErr } = await supabase
     .from('products')
@@ -1442,6 +1482,7 @@ export async function approveProduct(id: string) {
 }
 
 export async function rejectProduct(id: string, reason?: string) {
+  clearQueryCache();
   const { data: product } = await supabase
     .from('products')
     .select('seller_id, name')
@@ -1478,6 +1519,7 @@ export async function rejectProduct(id: string, reason?: string) {
 }
 
 export async function toggleProductStatus(id: string, sellerId?: string) {
+  clearQueryCache();
   let fetchQuery = supabase.from('products').select('is_active, seller_id').eq('id', id);
   if (sellerId) fetchQuery = fetchQuery.eq('seller_id', sellerId);
   const { data } = await fetchQuery.single();
@@ -1493,6 +1535,7 @@ export async function toggleProductStatus(id: string, sellerId?: string) {
 }
 
 export async function deleteProduct(id: string, sellerId?: string) {
+  clearQueryCache();
   let query = supabase.from('products').delete().eq('id', id);
   if (sellerId) query = query.eq('seller_id', sellerId);
   const { error } = await query;
@@ -1538,6 +1581,7 @@ export async function updateProduct(
     description?: string;
   }
 ) {
+  clearQueryCache();
   // Sanitise blob: URLs that may have leaked from browser previews
   const sanitised = { ...updates };
   if (sanitised.images) sanitised.images = sanitised.images.filter(u => !isBlobUrl(u));
@@ -1583,6 +1627,7 @@ export async function updateProductOfferRules(
   offerRules: Record<string, unknown>[],
   sellerId?: string
 ) {
+  clearQueryCache();
   // Verify ownership if sellerId provided
   if (sellerId) {
     const { data: product } = await supabase.from('products').select('id').eq('id', productId).eq('seller_id', sellerId).maybeSingle();
@@ -1624,6 +1669,7 @@ export async function submitReview(review: {
   heading: string;
   comment: string;
 }) {
+  clearQueryCache();
   const { data, error } = await supabase.from('reviews').insert(review).select().single();
   if (!error && data) {
     // Recalculate product rating
@@ -1712,6 +1758,7 @@ export function getDisplayRowsForCount(rules: SectionDisplayRule[], count: numbe
 // ---------- PRODUCT CONDITION DETAILS ----------
 
 export async function saveConditionDetails(productId: string, details: Record<string, unknown>) {
+  clearQueryCache();
   const payload = {
     product_id: productId,
     usage_duration: details.usage_duration as string,
@@ -1748,6 +1795,7 @@ export async function fetchConditionDetails(productId: string) {
 // ---------- PRODUCT RETURN POLICIES ----------
 
 export async function saveReturnPolicy(productId: string, policy: Record<string, unknown>) {
+  clearQueryCache();
   const payload = {
     product_id: productId,
     accepts_returns: Boolean(policy.accepts_returns),

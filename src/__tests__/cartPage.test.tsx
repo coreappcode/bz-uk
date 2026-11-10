@@ -51,6 +51,9 @@ vi.mock('../lib/pricingService', () => ({
   fetchPublicProductPrices: vi.fn().mockResolvedValue({ data: [] }),
   calculateCheckoutPricing: vi.fn().mockResolvedValue({ data: { items: [] }, error: null }),
 }));
+vi.mock('../lib/productService', () => ({
+  fetchProductById: vi.fn().mockResolvedValue({ data: { stock: 10 }, error: null }),
+}));
 vi.mock('react-router-dom', async (importOriginal) => ({
   ...(await importOriginal<typeof import('react-router-dom')>()),
   useNavigate: () => mocks.navigate,
@@ -149,9 +152,9 @@ describe('cart item cards', () => {
     expect(mocks.updateQuantity).toHaveBeenCalledWith('item-1', 3);
     await waitFor(() => expect(screen.getByRole('button', { name: /Proceed to Checkout/ })).toBeEnabled());
     fireEvent.click(screen.getByRole('button', { name: /Proceed to Checkout/ }));
-    expect(mocks.navigate).toHaveBeenCalledWith('/checkout/shipping', {
+    await waitFor(() => expect(mocks.navigate).toHaveBeenCalledWith('/checkout/shipping', {
       state: { selectedCartItemIds: ['item-1'] },
-    });
+    }));
     expect(JSON.parse(localStorage.getItem('beauzead_checkout_selected_cart_ids') || '[]')).toEqual(['item-1']);
   });
 
