@@ -691,6 +691,54 @@
     @apply mt-2 rounded-xl border border-red-100 text-red-600 shadow-sm;
   }
 
+  .ship-steps {
+    @apply flex items-center justify-between gap-2 mb-4 px-1;
+  }
+
+  .ship-step {
+    @apply flex-1 flex items-center justify-center gap-2 text-xs sm:text-sm font-medium text-slate-400 pb-2 border-b-2 border-slate-200;
+  }
+
+  .ship-step > span {
+    @apply inline-flex items-center justify-center w-5 h-5 rounded-full bg-slate-200 text-slate-500 text-[11px] font-bold;
+  }
+
+  .ship-step--active {
+    @apply text-[#6D28D9] border-[#6D28D9] font-semibold;
+  }
+
+  .ship-step--active > span {
+    @apply bg-[#6D28D9] text-white;
+  }
+
+  .ship-segment {
+    @apply grid grid-cols-2 gap-1 p-1 bg-slate-100 rounded-xl;
+  }
+
+  .ship-segment-btn {
+    @apply flex items-center justify-center gap-1.5 py-2.5 rounded-lg text-sm font-semibold text-slate-600 transition-all;
+  }
+
+  .ship-segment-btn--on {
+    @apply bg-white text-[#6D28D9] shadow-sm;
+  }
+
+  .ship-section-title {
+    @apply text-base font-bold text-slate-900 mb-4 pb-2 border-b border-slate-100;
+  }
+
+  .ship-label {
+    @apply block text-[13px] font-semibold text-slate-700 mb-1.5;
+  }
+
+  .ship-input {
+    @apply w-full px-3.5 py-3 text-base text-slate-900 bg-white border border-slate-300 rounded-xl placeholder:text-slate-400 focus:outline-none focus:border-[#6D28D9] focus:ring-2 focus:ring-[#6D28D9]/20 disabled:bg-slate-50 disabled:text-slate-500;
+  }
+
+  .ship-primary-btn {
+    @apply w-full py-3.5 bg-[#6D28D9] hover:bg-[#5b21b6] text-white rounded-xl text-[15px] font-bold transition-colors disabled:bg-slate-200 disabled:text-slate-500 disabled:cursor-not-allowed;
+  }
+
   .acct-panel {
     @apply bg-white rounded-2xl border border-slate-200/90 shadow-sm p-5 sm:p-8 min-w-0;
   }

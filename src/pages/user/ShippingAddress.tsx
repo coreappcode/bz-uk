@@ -647,29 +647,30 @@ const ShippingAddressPage: React.FC = () => {
   return (
     <>
     <Header />
-    <div className="min-h-screen bg-[#eaeded] py-4">
+    <div className="min-h-screen bg-slate-50 py-4 sm:py-6">
       <div className="max-w-[1100px] mx-auto px-4 pb-24 md:pb-5">
         <div className="grid grid-cols-1 lg:grid-cols-[1fr_340px] gap-5">
         {/* LEFT COLUMN */}
         <div>
-        <div className="bg-white border border-[#ddd] rounded-lg p-3 sm:p-6 mb-4">
-          <h2 className="text-[15px] sm:text-[18px] font-bold text-[#0f1111] mb-3 sm:mb-4 flex items-center gap-2 sm:gap-2.5">
-            <span className="inline-flex items-center justify-center w-6 h-6 sm:w-7 sm:h-7 bg-[#ff9900] text-white rounded-full text-xs sm:text-sm font-bold">1</span>
-            Shipping Address
-          </h2>
+        <ol className="ship-steps" aria-label="Checkout progress">
+          <li className="ship-step ship-step--active" aria-current="step"><span>1</span>Address</li>
+          <li className="ship-step"><span>2</span>Review</li>
+          <li className="ship-step"><span>3</span>Payment</li>
+        </ol>
+        <div className="bg-white border border-slate-200 rounded-2xl shadow-sm p-4 sm:p-6 mb-4">
+          <h2 className="text-lg sm:text-xl font-bold text-slate-900">Delivery address</h2>
+          <p className="text-xs sm:text-sm text-slate-500 mt-0.5 mb-4">Where should we send your order?</p>
 
           {/* Toggle between new address and saved addresses */}
           {savedAddresses.length > 0 && (
-            <div className="mb-3 sm:mb-5 flex gap-2 sm:gap-3">
+            <div className="ship-segment mb-4" role="tablist">
               <button
                 onClick={() => setUseExistingAddress(false)}
-                className={`flex-1 py-1.5 sm:py-2.5 px-2 sm:px-4 rounded-md sm:rounded-lg border sm:border-2 text-[12px] sm:text-sm font-semibold transition-all ${
-                  !useExistingAddress
-                    ? 'border-[#ff9900] bg-[#fffbf0] text-[#0f1111]'
-                    : 'border-gray-300 text-gray-600 hover:border-gray-400'
-                }`}
+                role="tab"
+                aria-selected={!useExistingAddress}
+                className={`ship-segment-btn ${!useExistingAddress ? 'ship-segment-btn--on' : ''}`}
               >
-                <Plus size={14} className="inline mr-1 sm:mr-1.5" />
+                <Plus size={15} />
                 New Address
               </button>
               <button
@@ -678,13 +679,11 @@ const ShippingAddressPage: React.FC = () => {
                   setDraftSaveError(false);
                   setUseExistingAddress(true);
                 }}
-                className={`flex-1 py-1.5 sm:py-2.5 px-2 sm:px-4 rounded-md sm:rounded-lg border sm:border-2 text-[12px] sm:text-sm font-semibold transition-all ${
-                  useExistingAddress
-                    ? 'border-[#ff9900] bg-[#fffbf0] text-[#0f1111]'
-                    : 'border-gray-300 text-gray-600 hover:border-gray-400'
-                }`}
+                role="tab"
+                aria-selected={useExistingAddress}
+                className={`ship-segment-btn ${useExistingAddress ? 'ship-segment-btn--on' : ''}`}
               >
-                <MapPin size={14} className="inline mr-1 sm:mr-1.5" />
+                <MapPin size={15} />
                 Saved ({savedAddresses.length})
               </button>
             </div>
@@ -692,31 +691,40 @@ const ShippingAddressPage: React.FC = () => {
 
           {/* Saved Addresses Grid */}
           {useExistingAddress && savedAddresses.length > 0 && (
-            <div className="mb-3 sm:mb-5 grid grid-cols-1 md:grid-cols-2 gap-2 sm:gap-3">
+            <div className="mb-4 grid grid-cols-1 md:grid-cols-2 gap-3" role="radiogroup" aria-label="Saved addresses">
               {savedAddresses.map((address) => (
                 <div
                   key={address.id}
+                  role="radio"
+                  aria-checked={selectedAddressId === address.id}
+                  tabIndex={0}
                   onClick={() => handleSelectAddress(address)}
-                  className={`relative px-2.5 py-2 sm:p-4 rounded-md sm:rounded-lg border sm:border-2 cursor-pointer transition-all ${
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' || e.key === ' ') {
+                      e.preventDefault();
+                      handleSelectAddress(address);
+                    }
+                  }}
+                  className={`relative p-3.5 rounded-xl border-2 cursor-pointer transition-all ${
                     selectedAddressId === address.id
-                      ? 'border-[#ff9900] bg-[#fffbf0]'
-                      : 'border-gray-300 hover:border-[#ff9900]'
+                      ? 'border-[#6D28D9] bg-[#6D28D9]/5'
+                      : 'border-slate-200 hover:border-[#6D28D9]/50'
                   }`}
                 >
                   {address.is_default && (
-                    <span className="absolute top-1.5 right-2 sm:top-2.5 sm:right-3 bg-[#007185] text-white text-[9px] sm:text-[11px] px-1.5 sm:px-2 py-0 sm:py-0.5 rounded">
+                    <span className="absolute top-3 right-3 bg-emerald-100 text-emerald-700 text-[11px] font-semibold px-2 py-0.5 rounded-full">
                       Default
                     </span>
                   )}
-                  <div className="flex items-center gap-1.5 mb-0.5 sm:mb-1 pr-14 sm:pr-16">
-                    <span className="font-bold text-[12px] sm:text-sm text-[#0f1111] truncate">{address.full_name}</span>
+                  <div className="flex items-center gap-1.5 mb-1 pr-16">
+                    <span className="font-semibold text-sm text-slate-900 truncate">{address.full_name}</span>
                     {selectedAddressId === address.id && (
-                      addressSelectionLoading ? <Loader2 size={14} className="text-[#ff9900] animate-spin shrink-0" /> : <Check size={14} className="text-[#ff9900] shrink-0" />
+                      addressSelectionLoading ? <Loader2 size={14} className="text-[#6D28D9] animate-spin shrink-0" /> : <Check size={14} className="text-[#6D28D9] shrink-0" />
                     )}
                   </div>
-                  <div className="text-[11px] sm:text-[13px] text-[#555] leading-snug sm:leading-relaxed">
+                  <div className="text-xs sm:text-[13px] text-slate-600 leading-relaxed">
                     <p className="truncate">{address.phone_number}</p>
-                    <p className="line-clamp-2 sm:line-clamp-none">
+                    <p>
                       {address.street_address_1}
                       {address.street_address_2 && `, ${address.street_address_2}`}
                       , {address.city}, {address.state} {address.postal_code}, {address.country}
@@ -729,50 +737,53 @@ const ShippingAddressPage: React.FC = () => {
 
           {/* New Address Form */}
           {(!useExistingAddress || savedAddresses.length === 0) && (
-            <form onSubmit={handleSubmit} className="space-y-6">
+            <form onSubmit={handleSubmit} className="space-y-7">
               {/* Contact Information */}
               <div>
-                <h3 className="text-lg font-semibold text-gray-900 mb-4">Contact Information</h3>
+                <h3 className="ship-section-title">Contact information</h3>
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                   <div>
-                    <label className="block text-sm font-semibold text-gray-700 mb-2">
-                      Full Name <span className="text-red-500">*</span>
+                    <label className="ship-label">
+                      Full Name <span className="text-red-500" aria-hidden>*</span>
                     </label>
                     <input
                       type="text"
                       name="full_name"
+                      autoComplete="name"
                       value={formData.full_name}
                       onChange={handleInputChange}
-                      className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:border-blue-500"
+                      className="ship-input"
                       placeholder="John Doe"
                       required
                     />
                   </div>
                   <div>
-                    <label className="block text-sm font-semibold text-gray-700 mb-2">
-                      Phone Number <span className="text-red-500">*</span>
+                    <label className="ship-label">
+                      Phone Number <span className="text-red-500" aria-hidden>*</span>
                     </label>
                     <input
                       type="tel"
                       name="phone_number"
+                      autoComplete="tel" inputMode="tel"
                       value={formData.phone_number}
                       onChange={handleInputChange}
-                      className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:border-blue-500"
+                      className="ship-input"
                       placeholder="+1 (555) 123-4567"
                       required
                     />
                   </div>
                 </div>
                 <div className="mt-4">
-                  <label className="block text-sm font-semibold text-gray-700 mb-2">
-                    Email <span className="text-red-500">*</span>
+                  <label className="ship-label">
+                    Email <span className="text-red-500" aria-hidden>*</span>
                   </label>
                   <input
                     type="email"
                     name="email"
+                      autoComplete="email" inputMode="email"
                     value={formData.email}
                     onChange={handleInputChange}
-                    className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:border-blue-500"
+                    className="ship-input"
                     placeholder="john@example.com"
                     required
                   />
@@ -781,14 +792,14 @@ const ShippingAddressPage: React.FC = () => {
 
               {/* Address Details */}
               <div>
-                <div className="flex items-center justify-between mb-4">
-                  <h3 className="text-lg font-semibold text-gray-900">Address Details</h3>
+                <div className="flex items-center justify-between gap-2 mb-4">
+                  <h3 className="ship-section-title !mb-0">Address details</h3>
                   {!IS_UK_STOREFRONT && (
                     <button
                       type="button"
                       onClick={() => void handleUseCurrentLocation()}
                       disabled={locationLoading}
-                      className="inline-flex items-center gap-2 px-3 py-2 text-xs font-semibold text-blue-700 bg-blue-50 border border-blue-200 rounded-lg hover:bg-blue-100 disabled:opacity-50"
+                      className="inline-flex items-center gap-2 px-3 py-2 text-xs font-semibold text-[#6D28D9] bg-[#6D28D9]/5 border border-[#6D28D9]/20 rounded-xl hover:bg-[#6D28D9]/10 disabled:opacity-50"
                     >
                       {locationLoading ? <Loader2 size={14} className="animate-spin" /> : <MapPin size={14} />}
                       Use Current Location
@@ -804,85 +815,90 @@ const ShippingAddressPage: React.FC = () => {
 
                 <div className="space-y-4">
                   <div>
-                    <label className="block text-sm font-semibold text-gray-700 mb-2">
-                      Street Address <span className="text-red-500">*</span>
+                    <label className="ship-label">
+                      Street Address <span className="text-red-500" aria-hidden>*</span>
                     </label>
                     <input
                       type="text"
                       name="street_address_1"
+                      autoComplete="address-line1"
                       value={formData.street_address_1}
                       onChange={handleInputChange}
-                      className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:border-blue-500"
+                      className="ship-input"
                       placeholder="123 Main Street"
                       required
                     />
                   </div>
                   <div>
-                    <label className="block text-sm font-semibold text-gray-700 mb-2">
+                    <label className="ship-label">
                       Apartment, Suite, etc. (Optional)
                     </label>
                     <input
                       type="text"
                       name="street_address_2"
+                      autoComplete="address-line2"
                       value={formData.street_address_2}
                       onChange={handleInputChange}
-                      className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:border-blue-500"
+                      className="ship-input"
                       placeholder="Apt 4B"
                     />
                   </div>
-                  <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                    <div>
-                      <label className="block text-sm font-semibold text-gray-700 mb-2">
-                        City <span className="text-red-500">*</span>
+                  <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
+                    <div className="col-span-2 md:col-span-1">
+                      <label className="ship-label">
+                        City <span className="text-red-500" aria-hidden>*</span>
                       </label>
                       <input
                         type="text"
                         name="city"
+                      autoComplete="address-level2"
                         value={formData.city}
                         onChange={handleInputChange}
-                        className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:border-blue-500"
+                        className="ship-input"
                         placeholder="New York"
                         required
                       />
                     </div>
                     <div>
-                      <label className="block text-sm font-semibold text-gray-700 mb-2">
-                        {IS_UK_STOREFRONT ? 'County' : 'State/Province'} <span className="text-red-500">*</span>
+                      <label className="ship-label">
+                        {IS_UK_STOREFRONT ? 'County' : 'State/Province'} <span className="text-red-500" aria-hidden>*</span>
                       </label>
                       <input
                         type="text"
                         name="state"
+                      autoComplete="address-level1"
                         value={formData.state}
                         onChange={handleInputChange}
-                        className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:border-blue-500"
+                        className="ship-input"
                         placeholder={IS_UK_STOREFRONT ? 'Greater London' : 'NY'}
                         required
                       />
                     </div>
                     <div>
-                      <label className="block text-sm font-semibold text-gray-700 mb-2">
-                        Postal Code <span className="text-red-500">*</span>
+                      <label className="ship-label">
+                        Postal Code <span className="text-red-500" aria-hidden>*</span>
                       </label>
                       <input
                         type="text"
                         name="postal_code"
+                      autoComplete="postal-code"
                         value={formData.postal_code}
                         onChange={handleInputChange}
-                        className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:border-blue-500"
+                        className="ship-input"
                         placeholder={IS_UK_STOREFRONT ? 'SW1A 1AA' : '10001'}
                         required
                       />
                     </div>
                   </div>
                   <div>
-                    <label className="block text-sm font-semibold text-gray-700 mb-2">
-                      Country <span className="text-red-500">*</span>
+                    <label className="ship-label">
+                      Country <span className="text-red-500" aria-hidden>*</span>
                     </label>
                     <select
                       name="country"
                       value={formData.country}
                       onChange={handleInputChange}
-                      className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:border-blue-500"
+                      className="ship-input"
                       disabled={IS_UK_STOREFRONT}
                       required
                     >
@@ -908,7 +924,7 @@ const ShippingAddressPage: React.FC = () => {
 
               {/* Delivery Notes */}
               <div>
-                <label className="block text-sm font-semibold text-gray-700 mb-2">
+                <label className="ship-label">
                   Delivery Notes (Optional)
                 </label>
                 <textarea
@@ -916,37 +932,37 @@ const ShippingAddressPage: React.FC = () => {
                   value={formData.delivery_notes}
                   onChange={handleInputChange}
                   rows={3}
-                  className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:border-blue-500 resize-none"
+                  className="ship-input resize-none"
                   placeholder="Any special instructions for delivery..."
                 />
               </div>
 
               {error && (
-                <div className="bg-red-50 border border-red-200 rounded-lg px-4 py-3 text-red-700">
+                <div className="bg-red-50 border border-red-200 rounded-xl px-4 py-3 text-red-700">
                   {error}
                 </div>
               )}
 
               {draftSaveError && (
-                <div className="bg-amber-50 border border-amber-200 rounded-lg px-4 py-3 text-amber-800" role="status">
+                <div className="bg-amber-50 border border-amber-200 rounded-xl px-4 py-3 text-amber-800" role="status">
                   Your address draft could not be saved on this device. Keep this page open until you continue checkout.
                 </div>
               )}
 
               {fxUnavailableForCheckout && (
-                <div className="bg-amber-50 border border-amber-200 rounded-lg px-4 py-3 text-amber-700 text-sm">
+                <div className="bg-amber-50 border border-amber-200 rounded-xl px-4 py-3 text-amber-700 text-sm">
                   Live currency conversion is temporarily unavailable. Checkout is paused until rates are available.
                 </div>
               )}
 
               {pricingLoading && (
-                <div className="bg-blue-50 border border-blue-200 rounded-lg px-4 py-3 text-blue-700 text-sm">
+                <div className="bg-[#6D28D9]/5 border border-[#6D28D9]/20 rounded-xl px-4 py-3 text-[#5b21b6] text-sm">
                   Checking configured shipping table, then live carrier fallback...
                 </div>
               )}
 
               {(publicPriceLoading || hasUnresolvedPublicPrices) && (
-                <div className="bg-blue-50 border border-blue-200 rounded-lg px-4 py-3 text-blue-700 text-sm">
+                <div className="bg-[#6D28D9]/5 border border-[#6D28D9]/20 rounded-xl px-4 py-3 text-[#5b21b6] text-sm">
                   Loading final item prices...
                 </div>
               )}
@@ -954,16 +970,16 @@ const ShippingAddressPage: React.FC = () => {
               <button
                 type="submit"
                 disabled={isLoading || pricingLoading || publicPriceLoading || hasUnresolvedPublicPrices || fxUnavailableForCheckout}
-                className="w-full py-3.5 bg-[#ffd814] hover:bg-[#f7ca00] border border-[#fcd200] disabled:bg-gray-200 disabled:border-gray-300 text-[#0f1111] rounded-lg text-[15px] font-bold cursor-pointer transition-colors"
+                className="ship-primary-btn"
               >
-                {isLoading ? 'Saving...' : (pricingLoading || publicPriceLoading || hasUnresolvedPublicPrices) ? 'Refreshing Shipping...' : 'Continue to Review Order'}
+                {isLoading ? 'Saving...' : (pricingLoading || publicPriceLoading || hasUnresolvedPublicPrices) ? 'Refreshing Shipping...' : 'Continue to review order →'}
               </button>
             </form>
           )}
 
           {/* Guidance when no address selected */}
           {useExistingAddress && !selectedAddressId && (
-            <p className="text-sm text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-4 py-3 text-center">
+            <p className="text-sm text-amber-700 bg-amber-50 border border-amber-200 rounded-xl px-4 py-3 text-center">
               Please select an address above to continue
             </p>
           )}
@@ -972,31 +988,31 @@ const ShippingAddressPage: React.FC = () => {
           {useExistingAddress && selectedAddressId && (
             <>
               {error && (
-                <div className="mb-4 bg-red-50 border border-red-200 rounded-lg px-4 py-3 text-red-700">
+                <div className="mb-4 bg-red-50 border border-red-200 rounded-xl px-4 py-3 text-red-700">
                   {error}
                 </div>
               )}
               {fxUnavailableForCheckout && (
-                <div className="mb-4 bg-amber-50 border border-amber-200 rounded-lg px-4 py-3 text-amber-700 text-sm">
+                <div className="mb-4 bg-amber-50 border border-amber-200 rounded-xl px-4 py-3 text-amber-700 text-sm">
                   Live currency conversion is temporarily unavailable. Checkout is paused until rates are available.
                 </div>
               )}
               {pricingLoading && (
-                <div className="mb-4 bg-blue-50 border border-blue-200 rounded-lg px-4 py-3 text-blue-700 text-sm">
+                <div className="mb-4 bg-[#6D28D9]/5 border border-[#6D28D9]/20 rounded-xl px-4 py-3 text-[#5b21b6] text-sm">
                   Checking configured shipping table, carrier fallback, and delivery estimate...
                 </div>
               )}
               {(publicPriceLoading || hasUnresolvedPublicPrices) && (
-                <div className="mb-4 bg-blue-50 border border-blue-200 rounded-lg px-4 py-3 text-blue-700 text-sm">
+                <div className="mb-4 bg-[#6D28D9]/5 border border-[#6D28D9]/20 rounded-xl px-4 py-3 text-[#5b21b6] text-sm">
                   Loading final item prices...
                 </div>
               )}
               <button
                 onClick={handleSubmit}
                 disabled={isLoading || pricingLoading || publicPriceLoading || hasUnresolvedPublicPrices || fxUnavailableForCheckout}
-                className="w-full py-3.5 bg-[#ffd814] hover:bg-[#f7ca00] border border-[#fcd200] disabled:bg-gray-200 disabled:border-gray-300 text-[#0f1111] rounded-lg text-[15px] font-bold cursor-pointer transition-colors"
+                className="ship-primary-btn"
               >
-                {isLoading ? 'Saving...' : (pricingLoading || publicPriceLoading || hasUnresolvedPublicPrices) ? 'Refreshing Shipping...' : 'Continue to Review Order'}
+                {isLoading ? 'Saving...' : (pricingLoading || publicPriceLoading || hasUnresolvedPublicPrices) ? 'Refreshing Shipping...' : 'Continue to review order →'}
               </button>
             </>
           )}
@@ -1005,8 +1021,8 @@ const ShippingAddressPage: React.FC = () => {
 
         {/* RIGHT COLUMN — Order Summary */}
         <div>
-          <div className="bg-white border border-[#ddd] rounded-lg p-3 sm:p-5 sticky top-5">
-            <h2 className="text-[15px] sm:text-[18px] font-bold text-[#0f1111] mb-2 sm:mb-4">Order Summary</h2>
+          <div className="bg-white border border-slate-200 rounded-2xl shadow-sm p-4 sm:p-5 sticky top-24">
+            <h2 className="text-base sm:text-lg font-bold text-slate-900 mb-3">Order summary</h2>
 
             <div className="space-y-1.5 sm:space-y-2 mb-2 sm:mb-3">
               <div className="flex justify-between text-[13px] sm:text-[14px]">
@@ -1032,12 +1048,12 @@ const ShippingAddressPage: React.FC = () => {
               )}
             </div>
 
-            <div className="border-t-2 border-[#ddd] pt-2 sm:pt-3 mt-2 sm:mt-3 flex justify-between text-[15px] sm:text-[18px] font-bold text-[#b12704]">
+            <div className="border-t border-slate-200 pt-2 sm:pt-3 mt-2 sm:mt-3 flex justify-between text-[15px] sm:text-[18px] font-bold text-slate-900">
               <span>Order Total</span>
               <span>{formatCurrency(pricing ? pricing.total : Number.NaN, targetCurrency)}</span>
             </div>
 
-            <div className="flex items-center justify-center gap-1.5 text-[11px] sm:text-[12px] text-[#067d62] mt-2 sm:mt-3">
+            <div className="flex items-center justify-center gap-1.5 text-[11px] sm:text-[12px] text-emerald-700 mt-3">
               🔒 Secure checkout powered by Stripe
             </div>
           </div>
