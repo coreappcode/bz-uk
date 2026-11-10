@@ -77,8 +77,8 @@ describe('checkout shipping addresses', () => {
 
   it('shows saved addresses first, selects the default and hides addresses outside the storefront country', async () => {
     renderPage();
-    expect(await screen.findByText('12 High Street')).toBeInTheDocument();
-    expect(screen.queryByText('Other Street')).not.toBeInTheDocument();
+    expect(await screen.findByText(/12 High Street/)).toBeInTheDocument();
+    expect(screen.queryByText(/Other Street/)).not.toBeInTheDocument();
     expect(screen.getAllByRole('radio')).toHaveLength(1);
     expect(screen.getByRole('radio', { name: /12 High Street/ })).toBeChecked();
     expect(screen.queryByRole('textbox', { name: /street address/i })).not.toBeInTheDocument();
@@ -93,12 +93,12 @@ describe('checkout shipping addresses', () => {
 
   it('opens the new address form on request and keeps a draft when returning to saved addresses', async () => {
     renderPage();
-    fireEvent.click(await screen.findByRole('button', { name: 'Add a new address' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Add New' }));
     const street = screen.getByPlaceholderText('123 Main Street');
     fireEvent.change(street, { target: { value: 'New Road' } });
     fireEvent.click(screen.getByRole('button', { name: /Back to saved addresses/ }));
-    expect(screen.getByText('12 High Street')).toBeInTheDocument();
-    fireEvent.click(screen.getByRole('button', { name: 'Add a new address' }));
+    expect(screen.getByText(/12 High Street/)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Add New' }));
     expect(screen.getByPlaceholderText('123 Main Street')).toHaveValue('New Road');
   });
 
@@ -109,7 +109,7 @@ describe('checkout shipping addresses', () => {
     });
     renderPage();
     fireEvent.click(await screen.findByRole('radio', { name: /24 Park Road/ }));
-    fireEvent.click(screen.getByRole('button', { name: 'Add a new address' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Add New' }));
     fireEvent.click(screen.getByRole('button', { name: /Back to saved addresses/ }));
     expect(screen.getByRole('radio', { name: /24 Park Road/ })).toBeChecked();
     await waitFor(() => expect(mocks.pricing).toHaveBeenLastCalledWith(expect.objectContaining({
@@ -122,8 +122,8 @@ describe('checkout shipping addresses', () => {
       formData: { street_address_1: 'Draft Road' },
     }));
     renderPage();
-    expect(await screen.findByText('12 High Street')).toBeInTheDocument();
-    fireEvent.click(screen.getByRole('button', { name: 'Add a new address' }));
+    expect(await screen.findByText(/12 High Street/)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Add New' }));
     expect(screen.getByLabelText(/street address/i)).toHaveValue('Draft Road');
   });
 
@@ -142,6 +142,6 @@ describe('checkout shipping addresses', () => {
     renderPage();
     expect(await screen.findByRole('alert')).toHaveTextContent("couldn't load your saved addresses");
     fireEvent.click(screen.getByRole('button', { name: 'Retry' }));
-    expect(await screen.findByText('12 High Street')).toBeInTheDocument();
+    expect(await screen.findByText(/12 High Street/)).toBeInTheDocument();
   });
 });

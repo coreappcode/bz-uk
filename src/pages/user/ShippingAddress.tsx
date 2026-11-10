@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
-import { MapPin, Plus, Loader2 } from 'lucide-react';
+import { MapPin, Plus, Loader2, Home, Building2, MoreHorizontal } from 'lucide-react';
 import { useCart } from '../../contexts/CartContext';
 import { useAuth } from '../../contexts/AuthContext';
 import { Skeleton, ListSkeleton } from '../../components/common/Skeleton';
@@ -8,7 +8,7 @@ import { Header } from '../../components/layout/Header';
 import { Footer } from '../../components/layout/Footer';
 import { MobileNav } from '../../components/layout/MobileNav';
 import { useCurrency } from '../../contexts/CurrencyContext';
-import { createUserAddress, getUserAddresses } from '../../lib/adminService';
+import { createUserAddress, deleteUserAddress, getUserAddresses, setDefaultUserAddress } from '../../lib/adminService';
 import type { UserAddress } from '../../types';
 import {
   calculateDestinationCheckoutPricing,
@@ -71,6 +71,7 @@ const ShippingAddressPage: React.FC = () => {
   const { rates } = useCurrency();
   const [useExistingAddress, setUseExistingAddress] = useState(true);
   const [savedAddresses, setSavedAddresses] = useState<UserAddress[]>([]);
+  const [menuAddressId, setMenuAddressId] = useState<string | null>(null);
   const [addressesError, setAddressesError] = useState(false);
   const [addressesRetry, setAddressesRetry] = useState(0);
   const [selectedAddressId, setSelectedAddressId] = useState<string | null>(null);
@@ -441,6 +442,34 @@ const ShippingAddressPage: React.FC = () => {
     });
   };
 
+  const handleMakeDefault = async (address: UserAddress) => {
+    setMenuAddressId(null);
+    if (!user?.id) return;
+    const result = await setDefaultUserAddress(user.id, address.id);
+    if (!result.success) {
+      setError(result.error || 'Could not update the default address.');
+      return;
+    }
+    setSavedAddresses((list) => list.map((a) => ({ ...a, is_default: a.id === address.id })));
+  };
+
+  const handleDeleteAddress = async (address: UserAddress) => {
+    setMenuAddressId(null);
+    if (!window.confirm('Delete this address?')) return;
+    const result = await deleteUserAddress(address.id);
+    if (!result.success) {
+      setError(result.error || 'Could not delete the address.');
+      return;
+    }
+    const remaining = savedAddresses.filter((a) => a.id !== address.id);
+    setSavedAddresses(remaining);
+    if (selectedAddressId === address.id && remaining.length > 0) {
+      handleSelectAddress(remaining.find((a) => a.is_default) || remaining[0]);
+    } else if (remaining.length === 0) {
+      setSelectedAddressId(null);
+    }
+  };
+
   const handleNewAddress = () => {
     setError('');
     setFormData(draftRef.current || {
@@ -690,41 +719,63 @@ const ShippingAddressPage: React.FC = () => {
               {savedAddresses.length === 0 ? (
                 <p className="mb-4 text-sm text-slate-600">You have no saved addresses yet. Add one to continue.</p>
               ) : (
-                <fieldset className="mb-4 space-y-3">
-                  <legend className="sr-only">Saved addresses</legend>
-                  {savedAddresses.map((address) => {
-                    return (
-                      <label key={address.id} className={`flex gap-3 rounded-xl border-2 p-4 ${
-                        selectedAddressId === address.id
-                          ? 'border-[#6D28D9] bg-[#6D28D9]/5'
-                          : 'border-slate-200 bg-white'
-                      } cursor-pointer hover:border-[#6D28D9]/50`}>
-                        <input
-                          type="radio"
-                          name="saved-address"
-                          value={address.id}
-                          checked={selectedAddressId === address.id}
-                          onChange={() => handleSelectAddress(address)}
-                          className="mt-1 h-5 w-5 shrink-0 accent-[#6D28D9]"
-                        />
-                        <span className="min-w-0 flex-1 text-sm text-slate-600 leading-relaxed">
-                          <span className="flex flex-wrap items-center gap-2 mb-1">
-                            <span className="font-bold text-slate-900">{address.full_name}</span>
-                            {address.is_default && <span className="rounded-full bg-[#6D28D9]/10 px-2 py-0.5 text-xs font-semibold text-[#6D28D9]">Default</span>}
-                            {selectedAddressId === address.id && addressSelectionLoading && <Loader2 size={14} className="animate-spin text-[#6D28D9]" aria-label="Updating shipping" />}
-                          </span>
-                          <span className="block">{address.street_address_1}{address.street_address_2 && `, ${address.street_address_2}`}</span>
-                          <span className="block">{[address.city, address.state, address.postal_code, address.country].filter(Boolean).join(', ')}</span>
-                          {address.phone_number && <span className="block">{address.phone_number}</span>}
-                        </span>
-                      </label>
-                    );
-                  })}
-                </fieldset>
+                <div className="mb-4" role="radiogroup" aria-label="Saved addresses">
+                  <div className="mb-2 flex items-center justify-between">
+                    <h2 className="text-sm font-semibold text-slate-900">Saved addresses</h2>
+                    <button type="button" onClick={handleNewAddress} className="flex items-center gap-1 text-sm font-semibold text-blue-600 hover:underline">
+                      <Plus size={15} /> Add New
+                    </button>
+                  </div>
+                  <ul className="divide-y divide-slate-100">
+                    {savedAddresses.map((address) => {
+                      const selected = selectedAddressId === address.id;
+                      const TypeIcon = address.address_type === 'work' ? Building2 : Home;
+                      const line = [address.street_address_1, address.street_address_2, address.city, address.state, address.postal_code].filter(Boolean).join(', ');
+                      return (
+                        <li key={address.id} className="relative flex items-center gap-2 py-3">
+                          <button
+                            type="button"
+                            role="radio"
+                            aria-checked={selected}
+                            onClick={() => handleSelectAddress(address)}
+                            className="min-w-0 flex-1 text-left"
+                          >
+                            <span className="flex items-center gap-2">
+                              <TypeIcon size={16} className="shrink-0 text-slate-500" aria-hidden="true" />
+                              <span className="truncate text-sm font-bold text-slate-900">{address.full_name}</span>
+                              {selected && <span className="rounded bg-blue-100 px-2 py-0.5 text-xs font-medium text-blue-700">Selected</span>}
+                              {selected && addressSelectionLoading && <Loader2 size={14} className="animate-spin text-[#6D28D9]" aria-label="Updating shipping" />}
+                            </span>
+                            <span className="mt-1 block truncate text-xs text-slate-500">{line}</span>
+                          </button>
+                          <button
+                            type="button"
+                            aria-label={`More options for ${address.full_name}`}
+                            aria-expanded={menuAddressId === address.id}
+                            onClick={() => setMenuAddressId(menuAddressId === address.id ? null : address.id)}
+                            className="shrink-0 rounded p-1 text-slate-500 hover:bg-slate-100"
+                          >
+                            <MoreHorizontal size={20} />
+                          </button>
+                          {menuAddressId === address.id && (
+                            <div className="absolute right-0 top-10 z-10 w-44 rounded-lg border border-slate-200 bg-white py-1 shadow-lg">
+                              {!address.is_default && (
+                                <button type="button" onClick={() => handleMakeDefault(address)} className="block w-full px-3 py-2 text-left text-sm hover:bg-slate-50">Set as default</button>
+                              )}
+                              <button type="button" onClick={() => handleDeleteAddress(address)} className="block w-full px-3 py-2 text-left text-sm text-red-600 hover:bg-slate-50">Delete</button>
+                            </div>
+                          )}
+                        </li>
+                      );
+                    })}
+                  </ul>
+                </div>
               )}
-              <button type="button" onClick={handleNewAddress} className="flex w-full items-center justify-center gap-2 rounded-xl border-2 border-[#6D28D9] px-4 py-3 font-semibold text-[#6D28D9] hover:bg-[#6D28D9]/5">
-                <Plus size={18} /> Add a new address
-              </button>
+              {savedAddresses.length === 0 && (
+                <button type="button" onClick={handleNewAddress} className="flex w-full items-center justify-center gap-2 rounded-xl border-2 border-[#6D28D9] px-4 py-3 font-semibold text-[#6D28D9] hover:bg-[#6D28D9]/5">
+                  <Plus size={18} /> Add a new address
+                </button>
+              )}
             </>
           ) : (
             <button type="button" onClick={handleBackToAddresses} className="mb-4 text-sm font-semibold text-[#6D28D9] hover:underline">
