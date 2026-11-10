@@ -222,7 +222,7 @@ There is no separate route-folder hierarchy.
 | `/otp-verification`, `/forgot-password`, `/new-password` | Authentication and recovery flows | Public auth flow |
 | `/cart`, `/wishlist`, `/orders`, `/orders/:orderId` | Buyer shopping and order areas | Signed-in buyer |
 | `/checkout/shipping`, `/checkout/review`, `/checkout/payment`, `/checkout/confirmation` | Checkout journey | Signed-in buyer |
-| `/profile`, `/settings`, `/notifications`, `/user/addresses` | Buyer account management | Signed-in buyer |
+| `/profile`, `/settings`, `/notifications`, `/user/addresses`, `/user/addresses/new`, `/user/addresses/:addressId/edit` | Buyer account and address management | Signed-in buyer |
 | `/privacy-policy`, `/terms-of-service`, `/shipping-policy`, `/refund-policy`, `/terms-and-conditions`, `/about`, `/contact` | Informational and legal pages | Public |
 | `/seller`, `/seller/*` | External seller-portal redirect | Redirects to BZEAD.COM |
 

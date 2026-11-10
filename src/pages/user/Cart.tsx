@@ -1,14 +1,16 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { Header } from '../../components/layout/Header';
 import { Footer } from '../../components/layout/Footer';
 
 import { ListSkeleton } from '../../components/common/Skeleton';
+import { ToastContainer } from '../../components/common/ToastContainer';
+import { useToast } from '../../hooks/useToast';
 import { useAuth } from '../../contexts/AuthContext';
 import { useCart } from '../../contexts/CartContext';
 import { useCurrency } from '../../contexts/CurrencyContext';
 import { useWishlist } from '../../contexts/WishlistContext';
 import { useNavigate, Link } from 'react-router-dom';
-import { ShoppingCart, Loader2, AlertTriangle, Trash2 } from 'lucide-react';
+import { ShoppingCart, Loader2, AlertTriangle, Trash2, Heart } from 'lucide-react';
 import {
   calculateCheckoutPricing,
   fetchPublicProductPrices,
@@ -20,9 +22,10 @@ import { isNativePlatform } from '../../mobile/nativePlatform';
 
 export const CartPage: React.FC = () => {
   const { user, currentAuthUser } = useAuth();
-  const { items: cartItems, removeFromCart, updateQuantity } = useCart();
+  const { items: cartItems, removeFromCart, removeFromCartConfirmed, updateQuantity } = useCart();
   const { formatPrice, convertPrice, currency } = useCurrency();
-  const { addToWishlist } = useWishlist();
+  const { addToWishlistConfirmed } = useWishlist();
+  const toast = useToast();
   const navigate = useNavigate();
   const [loading, setLoading] = useState(true);
   const [updatingId, setUpdatingId] = useState<string | null>(null);
@@ -38,6 +41,8 @@ export const CartPage: React.FC = () => {
   const [, setPublicPriceLoading] = useState(false);
   const [selectedItemIds, setSelectedItemIds] = useState<string[]>([]);
   const [confirmRemoveId, setConfirmRemoveId] = useState<string | null>(null);
+  const [wishlistMovingId, setWishlistMovingId] = useState<string | null>(null);
+  const wishlistMoveInProgress = useRef(false);
 
   useEffect(() => {
     if (!user && !currentAuthUser) {
@@ -71,9 +76,27 @@ export const CartPage: React.FC = () => {
     }, 300);
   };
 
-  const handleMoveToWishlist = (cartItem: (typeof cartItems)[0]) => {
-    addToWishlist(cartItem.product);
-    removeFromCart(cartItem.cartItemId);
+  const handleAddToWishlist = async (cartItem: (typeof cartItems)[0]) => {
+    if (wishlistMoveInProgress.current) return;
+    wishlistMoveInProgress.current = true;
+    setWishlistMovingId(cartItem.cartItemId);
+    let added = false;
+    try {
+      const userId = user?.id || currentAuthUser?.userId;
+      if (!userId) throw new Error('Please sign in to update your wishlist.');
+      await addToWishlistConfirmed(cartItem.product, userId);
+      added = true;
+      await removeFromCartConfirmed(cartItem.cartItemId);
+      toast.success('Product added to wishlist');
+    } catch (error) {
+      console.error('Unable to move cart item to wishlist:', error);
+      toast.error(added
+        ? 'Product was added to your wishlist, but could not be removed from your cart.'
+        : 'Could not add product to your wishlist. Please try again.');
+    } finally {
+      wishlistMoveInProgress.current = false;
+      setWishlistMovingId(null);
+    }
   };
 
   const selectedCountry = useDestinationCountry({
@@ -299,6 +322,7 @@ export const CartPage: React.FC = () => {
       style={isNativePlatform ? { height: '100dvh', overflow: 'hidden' } : undefined}
     >
       <Header />
+      <ToastContainer toasts={toast.toasts} dismiss={toast.dismiss} />
 
       <main
         className="flex flex-1 min-h-0 w-full max-w-[1100px] mx-auto flex-col bg-white px-0 py-0 pb-0 md:block md:bg-transparent md:px-4 md:py-5 md:pb-5"
@@ -344,7 +368,7 @@ export const CartPage: React.FC = () => {
                     onChange={toggleSelectAll}
                     className="w-[18px] h-[18px] accent-[#ff9900] cursor-pointer"
                   />
-                  <span className="hidden md:inline">Select All Items</span>
+                  <span>Select All Items</span>
                 </label>
                 <button
                   onClick={toggleSelectAll}
@@ -356,7 +380,7 @@ export const CartPage: React.FC = () => {
 
               {/* ─── Cart Items ─── */}
               <div
-                className="native-cart-scroll min-h-0 flex-1 overflow-y-auto overscroll-contain bg-white px-2 md:block md:overflow-visible md:px-0"
+                className="native-cart-scroll min-h-0 flex-1 overflow-y-auto overscroll-contain bg-slate-100 px-0 md:block md:overflow-visible md:bg-slate-50"
                 style={isNativePlatform ? { display: 'block', overflow: 'visible' } : undefined}
               >
                 {cartItems.map((cartItem) => {
@@ -365,35 +389,59 @@ export const CartPage: React.FC = () => {
                   : publicPriceMap[cartItem.product.id]
                     ?? pricingByProductId.get(cartItem.product.id)?.publicUnitPrice
                     ?? cartItem.product.price;
-                const isUpdating = updatingId === cartItem.cartItemId;
+                const isMovingToWishlist = wishlistMovingId === cartItem.cartItemId;
+                const isUpdating = updatingId === cartItem.cartItemId || isMovingToWishlist;
 
                 return (
                   <div
                     key={cartItem.cartItemId}
-                    className={`native-cart-item flex gap-2.5 border border-[#ddd] px-3 py-2.5 last:mb-0 md:border-x-0 md:border-t-0 md:px-0 sm:gap-4 sm:py-4 ${isUpdating ? 'opacity-50 pointer-events-none' : ''}`}
+                    className={`mb-2 bg-white border border-slate-200 last:mb-0 ${isUpdating ? 'opacity-60' : ''}`}
+                    aria-busy={isUpdating}
                   >
-                    {/* Checkbox */}
-                    <div className="pt-1 shrink-0">
+                    <div className="flex gap-3 p-3 sm:p-4">
                       <input
                         type="checkbox"
                         checked={selectedItemIds.includes(cartItem.cartItemId)}
                         onChange={() => toggleSelectItem(cartItem.cartItemId)}
-                        className="w-[18px] h-[18px] accent-[#ff9900] cursor-pointer"
+                        disabled={isUpdating}
+                        aria-label={`Select ${cartItem.product.name}`}
+                        className="mt-1 w-[18px] h-[18px] accent-[#ff9900] cursor-pointer shrink-0"
                       />
-                    </div>
-
-                    {/* Image */}
-                    <div className={`native-cart-image shrink-0 rounded-lg border border-[#eee] bg-[#f9f9f9] overflow-hidden ${isNativePlatform ? 'w-[62px] h-[62px]' : 'w-[78px] h-[78px] sm:w-[90px] sm:h-[90px] md:w-[100px] md:h-[100px]'}`}>
-                      <img
-                        src={cartItem.product.image_url}
-                        alt={cartItem.product.name}
-                        className="w-full h-full object-cover"
-                      />
-                    </div>
-
-                    {/* Details */}
-                    <div className="flex-1 min-w-0">
-                      <div className="text-[15px] sm:text-[15px] font-semibold leading-snug line-clamp-2 mb-0.5">
+                      <div className="flex shrink-0 flex-col items-center gap-2">
+                        <div className="rounded border border-slate-200 bg-white overflow-hidden w-[72px] h-[72px] sm:w-[96px] sm:h-[96px]">
+                          <img
+                            src={cartItem.product.image_url}
+                            alt={cartItem.product.name}
+                            className="w-full h-full object-contain"
+                          />
+                        </div>
+                        <div className="flex items-center border border-slate-200 rounded overflow-hidden">
+                          <button
+                            type="button"
+                            onClick={() => handleUpdateQuantity(cartItem.cartItemId, cartItem.quantity - 1)}
+                            disabled={isUpdating}
+                            aria-label={`Decrease quantity of ${cartItem.product.name}`}
+                            className="w-7 h-8 bg-white text-slate-700 hover:bg-slate-50 disabled:opacity-50"
+                          >
+                            −
+                          </button>
+                          <span className="min-w-7 h-8 flex items-center justify-center text-sm font-semibold border-x border-slate-200">
+                            {cartItem.quantity}
+                          </span>
+                          <button
+                            type="button"
+                            onClick={() => handleUpdateQuantity(cartItem.cartItemId, cartItem.quantity + 1)}
+                            disabled={isUpdating || cartItem.quantity >= cartItem.product.stock}
+                            aria-label={`Increase quantity of ${cartItem.product.name}`}
+                            className="w-7 h-8 bg-white text-slate-700 hover:bg-slate-50 disabled:opacity-50"
+                          >
+                            +
+                          </button>
+                        </div>
+                        {isUpdating && <Loader2 className="w-4 h-4 text-[#ff9900] animate-spin" />}
+                      </div>
+                      <div className="flex-1 min-w-0">
+                      <div className="text-[14px] sm:text-[15px] font-semibold leading-snug line-clamp-2 mb-1">
                         <Link
                           to={`/products/${cartItem.product.slug || cartItem.product.id}`}
                           className="text-[#0f1111] hover:text-[#c45500] hover:underline transition-colors"
@@ -411,7 +459,12 @@ export const CartPage: React.FC = () => {
                           {cartItem.selectedColor && `Color: ${cartItem.selectedColor}`}
                         </p>
                       )}
-                      <div className="flex flex-wrap gap-1.5 mb-2">
+                      <div className="mt-2 text-[16px] sm:text-[18px] font-bold text-[#b12704]">
+                        {typeof itemPrice === 'number'
+                          ? formatPrice(itemPrice, resolvePublicPriceSourceCurrency(cartItem))
+                          : 'Loading…'}
+                      </div>
+                      <div className="flex flex-wrap gap-1.5 mt-2">
                         {cartItem.product.stock > 0 ? (
                           <span className="inline-block text-[11px] font-semibold px-2 py-0.5 rounded bg-[#d1fae5] text-[#047857]">In Stock</span>
                         ) : (
@@ -419,59 +472,32 @@ export const CartPage: React.FC = () => {
                         )}
                       </div>
 
-                      {/* Quantity Controls + Actions */}
-                      <div className="native-cart-qty-row flex items-center gap-2 flex-wrap">
-                        <div className="flex items-center border border-[#ddd] rounded-lg overflow-hidden">
-                          <button
-                            onClick={() => handleUpdateQuantity(cartItem.cartItemId, cartItem.quantity - 1)}
-                            disabled={isUpdating}
-                            className="w-8 h-8 bg-[#f0f0f0] border-none text-[16px] font-bold text-[#0f1111] cursor-pointer hover:bg-[#e0e0e0] disabled:opacity-50 flex items-center justify-center"
-                          >
-                            −
-                          </button>
-                          <div className="w-10 h-8 flex items-center justify-center text-[14px] font-semibold border-x border-[#ddd] bg-white">
-                            {cartItem.quantity}
-                          </div>
-                          <button
-                            onClick={() => handleUpdateQuantity(cartItem.cartItemId, cartItem.quantity + 1)}
-                            disabled={isUpdating}
-                            className="w-8 h-8 bg-[#f0f0f0] border-none text-[16px] font-bold text-[#0f1111] cursor-pointer hover:bg-[#e0e0e0] disabled:opacity-50 flex items-center justify-center"
-                          >
-                            +
-                          </button>
-                        </div>
-
-                        {isUpdating && <Loader2 className="w-4 h-4 text-[#ff9900] animate-spin" />}
-
-                        <div className="native-cart-actions flex items-center gap-2">
-                          <button
-                            onClick={() => handleMoveToWishlist(cartItem)}
-                            disabled={isUpdating}
-                            className="text-[11px] text-[#007185] font-semibold bg-transparent border-none cursor-pointer hover:text-[#c7511f] hover:underline disabled:opacity-50 p-0 md:after:content-['|'] md:after:ml-3 md:after:text-[#ddd]"
-                          >
-                            Move to Wishlist
-                          </button>
-                          <button
-                            onClick={() => setConfirmRemoveId(cartItem.cartItemId)}
-                            disabled={isUpdating}
-                            data-no-global-confirm="true"
-                            aria-label={`Remove ${cartItem.product.name} from cart`}
-                            className="ml-auto text-[#0f1111] bg-transparent border-none cursor-pointer hover:text-[#c7511f] disabled:opacity-50 p-1 md:static md:p-0"
-                          >
-                            <Trash2 className="h-4 w-4 md:hidden" aria-hidden="true" />
-                            <span className="hidden md:inline">Delete</span>
-                          </button>
-                        </div>
                       </div>
                     </div>
-
-                    {/* Price Column */}
-                    <div className="text-right shrink-0 min-w-[60px] sm:min-w-[90px]">
-                      <div className="text-[16px] sm:text-[18px] font-bold text-[#b12704]">
-                        {typeof itemPrice === 'number'
-                          ? formatPrice(itemPrice, resolvePublicPriceSourceCurrency(cartItem))
-                          : 'Loading…'}
-                      </div>
+                    <div className="grid grid-cols-2 border-t border-slate-100 divide-x divide-slate-100">
+                      <button
+                        type="button"
+                        onClick={() => handleAddToWishlist(cartItem)}
+                        disabled={isUpdating || wishlistMovingId !== null}
+                        aria-label={isMovingToWishlist ? `Adding ${cartItem.product.name} to wishlist` : `Add ${cartItem.product.name} to wishlist`}
+                        className="flex min-h-11 items-center justify-center gap-2 px-2 text-xs sm:text-sm font-semibold text-slate-600 hover:bg-slate-50 hover:text-[#007185] disabled:opacity-50"
+                      >
+                        {isMovingToWishlist
+                          ? <Loader2 className="h-4 w-4 shrink-0 animate-spin" aria-hidden="true" />
+                          : <Heart className="h-4 w-4 shrink-0" aria-hidden="true" />}
+                        {isMovingToWishlist ? 'Adding to Wishlist…' : 'Add to Wishlist'}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setConfirmRemoveId(cartItem.cartItemId)}
+                        disabled={isUpdating}
+                        data-no-global-confirm="true"
+                        aria-label={`Remove ${cartItem.product.name} from cart`}
+                        className="flex min-h-11 items-center justify-center gap-2 px-2 text-xs sm:text-sm font-semibold text-slate-600 hover:bg-slate-50 hover:text-[#b12704] disabled:opacity-50"
+                      >
+                        <Trash2 className="h-4 w-4 shrink-0" aria-hidden="true" />
+                        Remove
+                      </button>
                     </div>
                   </div>
                 );
@@ -527,7 +553,7 @@ export const CartPage: React.FC = () => {
 
                 <button
                   onClick={handleCheckout}
-                  disabled={!hasResolvedSelectedPrices}
+                  disabled={!hasResolvedSelectedPrices || wishlistMovingId !== null}
                   className="w-full mt-4 py-3.5 bg-[#ffd814] border border-[#fcd200] rounded-[10px] text-[15px] font-bold text-[#0f1111] cursor-pointer hover:bg-[#f7ca00] active:bg-[#e8b800] transition-colors"
                 >
                   Proceed to Checkout →
