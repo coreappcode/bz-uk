@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
-import { MapPin, Plus, Loader2, Home, Building2, MoreHorizontal } from 'lucide-react';
+import { MapPin, Plus, Loader2, Home, Building2, MoreHorizontal, ArrowLeft, PlusCircle, Bookmark, User, Phone, Mail, Map, Save } from 'lucide-react';
 import { useCart } from '../../contexts/CartContext';
 import { useAuth } from '../../contexts/AuthContext';
 import { Skeleton, ListSkeleton } from '../../components/common/Skeleton';
@@ -71,6 +71,7 @@ const ShippingAddressPage: React.FC = () => {
   const { rates } = useCurrency();
   const [useExistingAddress, setUseExistingAddress] = useState(true);
   const [savedAddresses, setSavedAddresses] = useState<UserAddress[]>([]);
+  const [setAsDefault, setSetAsDefault] = useState(true);
   const [menuAddressId, setMenuAddressId] = useState<string | null>(null);
   const [addressesError, setAddressesError] = useState(false);
   const [addressesRetry, setAddressesRetry] = useState(0);
@@ -593,7 +594,7 @@ const ShippingAddressPage: React.FC = () => {
           postal_code: formData.postal_code,
           delivery_notes: formData.delivery_notes || null,
           address_type: 'home',
-          is_default: savedAddresses.length === 0,
+          is_default: savedAddresses.length === 0 || setAsDefault,
         };
 
         const created = await createUserAddress(payload);
@@ -604,7 +605,13 @@ const ShippingAddressPage: React.FC = () => {
         const newAddress = created.data as UserAddress;
         activeAddressId = newAddress.id;
         setSelectedAddressId(newAddress.id);
-        setSavedAddresses((prev) => [newAddress, ...prev]);
+        if (payload.is_default && savedAddresses.length > 0) {
+          await setDefaultUserAddress(userId, newAddress.id);
+        }
+        setSavedAddresses((prev) => [
+          { ...newAddress, is_default: payload.is_default },
+          ...prev.map((a) => (payload.is_default ? { ...a, is_default: false } : a)),
+        ]);
       }
 
       // Store shipping address in localStorage for order summary page
@@ -703,9 +710,24 @@ const ShippingAddressPage: React.FC = () => {
           <li className="ship-step"><span>3</span>Payment</li>
         </ol>
         <div className="bg-white border border-slate-200 rounded-2xl shadow-sm p-4 sm:p-6 mb-4">
-          <h1 className="text-xl sm:text-2xl font-bold text-slate-900 mb-4">
-            {useExistingAddress ? 'Choose delivery address' : 'Add a new address'}
-          </h1>
+          <div className="mb-4 flex items-center gap-3">
+            <button type="button" onClick={() => navigate(-1)} aria-label="Go back" className="rounded-full p-1 text-slate-900 hover:bg-slate-100">
+              <ArrowLeft size={22} />
+            </button>
+            <h1 className="text-xl font-bold text-slate-900">Shipping Address</h1>
+          </div>
+          {!addressesError && (
+            <div className="mb-4 grid grid-cols-2 gap-3" role="tablist" aria-label="Address mode">
+              <button type="button" role="tab" aria-selected={!useExistingAddress} onClick={handleNewAddress}
+                className={`ship-tab ${!useExistingAddress ? 'ship-tab--on' : ''}`}>
+                <PlusCircle size={18} /> Add New Address
+              </button>
+              <button type="button" role="tab" aria-selected={useExistingAddress} onClick={handleBackToAddresses}
+                className={`ship-tab ${useExistingAddress ? 'ship-tab--on' : ''}`}>
+                <Bookmark size={18} /> Saved Addresses
+              </button>
+            </div>
+          )}
 
           {addressesError ? (
             <div role="alert" className="rounded-xl border border-red-200 bg-red-50 p-4 text-sm text-red-700">
@@ -777,188 +799,86 @@ const ShippingAddressPage: React.FC = () => {
                 </button>
               )}
             </>
-          ) : (
-            <button type="button" onClick={handleBackToAddresses} className="mb-4 text-sm font-semibold text-[#6D28D9] hover:underline">
-              ← Back to saved addresses
-            </button>
-          )}
+          ) : null}
 
           {/* New Address Form */}
           {!addressesError && !useExistingAddress && (
-            <form onSubmit={handleSubmit} className="space-y-7">
-              {/* Contact Information */}
-              <div>
-                <h3 className="ship-section-title">Contact information</h3>
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  <div>
-                    <label htmlFor="shipping-full-name" className="ship-label">
-                      Full Name <span className="text-red-500" aria-hidden>*</span>
-                    </label>
-                    <input
-                      type="text"
-                      id="shipping-full-name"
-                      name="full_name"
-                      autoComplete="name"
-                      value={formData.full_name}
-                      onChange={handleInputChange}
-                      className="ship-input"
-                      placeholder="John Doe"
-                      required
-                    />
-                  </div>
-                  <div>
-                    <label htmlFor="shipping-phone" className="ship-label">
-                      Phone Number <span className="text-red-500" aria-hidden>*</span>
-                    </label>
-                    <input
-                      type="tel"
-                      id="shipping-phone"
-                      name="phone_number"
-                      autoComplete="tel" inputMode="tel"
-                      value={formData.phone_number}
-                      onChange={handleInputChange}
-                      className="ship-input"
-                      placeholder="+1 (555) 123-4567"
-                      required
-                    />
-                  </div>
-                </div>
-                <div className="mt-4">
-                  <label htmlFor="shipping-email" className="ship-label">
-                    Email <span className="text-red-500" aria-hidden>*</span>
-                  </label>
-                  <input
-                    type="email"
-                    id="shipping-email"
-                    name="email"
-                      autoComplete="email" inputMode="email"
-                    value={formData.email}
-                    onChange={handleInputChange}
-                    className="ship-input"
-                    placeholder="john@example.com"
-                    required
-                  />
+            <form onSubmit={handleSubmit} className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm space-y-3">
+              <div className="mb-1 flex items-center gap-3">
+                <span className="flex h-10 w-10 items-center justify-center rounded-full bg-[#6D28D9]/10 text-[#6D28D9]"><MapPin size={20} /></span>
+                <div>
+                  <h2 className="text-base font-bold text-slate-900">Add New Address</h2>
+                  <p className="text-xs text-slate-500">Enter your delivery address details</p>
                 </div>
               </div>
-
-              {/* Address Details */}
-              <div>
-                <div className="flex items-center justify-between gap-2 mb-4">
-                  <h3 className="ship-section-title !mb-0">Address details</h3>
-                  {!IS_UK_STOREFRONT && (
-                    <button
-                      type="button"
-                      onClick={() => void handleUseCurrentLocation()}
-                      disabled={locationLoading}
-                      className="inline-flex items-center gap-2 px-3 py-2 text-xs font-semibold text-[#6D28D9] bg-[#6D28D9]/5 border border-[#6D28D9]/20 rounded-xl hover:bg-[#6D28D9]/10 disabled:opacity-50"
-                    >
-                      {locationLoading ? <Loader2 size={14} className="animate-spin" /> : <MapPin size={14} />}
-                      Use Current Location
-                    </button>
-                  )}
+                <div>
+                  <label htmlFor="shipping-full-name" className="sr-only">Full Name</label>
+                  <div className="ship-field">
+                    <User size={18} className="ship-field-icon" aria-hidden="true" />
+                    <input type="text" id="shipping-full-name" name="full_name" value={formData.full_name} onChange={handleInputChange} className="ship-input ship-input--icon" placeholder="Full Name *" required />
+                  </div>
                 </div>
-
-                {locationError && (
-                  <div className="mb-3 bg-red-50 border border-red-200 rounded-lg px-3 py-2 text-xs text-red-700">
-                    {locationError}
+                <div>
+                  <label htmlFor="shipping-phone" className="sr-only">Phone Number</label>
+                  <div className="ship-field">
+                    <Phone size={18} className="ship-field-icon" aria-hidden="true" />
+                    <input type="tel" id="shipping-phone" name="phone_number" value={formData.phone_number} onChange={handleInputChange} className="ship-input ship-input--icon" placeholder="Mobile Number *" required />
                   </div>
-                )}
-
-                <div className="space-y-4">
-                  <div>
-                    <label htmlFor="shipping-street" className="ship-label">
-                      Street Address <span className="text-red-500" aria-hidden>*</span>
-                    </label>
-                    <input
-                      type="text"
-                      id="shipping-street"
-                      name="street_address_1"
-                      autoComplete="address-line1"
-                      value={formData.street_address_1}
-                      onChange={handleInputChange}
-                      className="ship-input"
-                      placeholder="123 Main Street"
-                      required
-                    />
+                </div>
+              {!formData.email && (
+                <div>
+                  <label htmlFor="shipping-email" className="sr-only">Email</label>
+                  <div className="ship-field">
+                    <Mail size={18} className="ship-field-icon" aria-hidden="true" />
+                    <input type="email" id="shipping-email" name="email" value={formData.email} onChange={handleInputChange} className="ship-input ship-input--icon" placeholder="Email *" required />
                   </div>
-                  <div>
-                    <label htmlFor="shipping-street-2" className="ship-label">
-                      Apartment, Suite, etc. (Optional)
-                    </label>
-                    <input
-                      type="text"
-                      id="shipping-street-2"
-                      name="street_address_2"
-                      autoComplete="address-line2"
-                      value={formData.street_address_2}
-                      onChange={handleInputChange}
-                      className="ship-input"
-                      placeholder="Apt 4B"
-                    />
+                </div>
+              )}
+              {!IS_UK_STOREFRONT && (
+                <button type="button" onClick={() => void handleUseCurrentLocation()} disabled={locationLoading}
+                  className="inline-flex items-center gap-2 rounded-xl border border-[#6D28D9]/20 bg-[#6D28D9]/5 px-3 py-2 text-xs font-semibold text-[#6D28D9] disabled:opacity-50">
+                  {locationLoading ? <Loader2 size={14} className="animate-spin" /> : <MapPin size={14} />} Use Current Location
+                </button>
+              )}
+              {locationError && (
+                <div className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-700">{locationError}</div>
+              )}
+              <div>
+                <label htmlFor="shipping-street" className="sr-only">Street Address</label>
+                <div className="ship-field">
+                  <MapPin size={18} className="ship-field-icon ship-field-icon--top" aria-hidden="true" />
+                  <textarea id="shipping-street" name="street_address_1" autoComplete="address-line1" rows={3} value={formData.street_address_1} onChange={handleInputChange}
+                    className="ship-input ship-input--icon resize-none" placeholder="Address (House No, Building, Street) *" required />
+                </div>
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label htmlFor="shipping-city" className="sr-only">City</label>
+                  <div className="ship-field">
+                    <Building2 size={18} className="ship-field-icon" aria-hidden="true" />
+                    <input type="text" id="shipping-city" name="city" value={formData.city} onChange={handleInputChange} className="ship-input ship-input--icon" placeholder="City / Town *" required />
                   </div>
-                  <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
-                    <div className="col-span-2 md:col-span-1">
-                      <label htmlFor="shipping-city" className="ship-label">
-                        City <span className="text-red-500" aria-hidden>*</span>
-                      </label>
-                      <input
-                        type="text"
-                        id="shipping-city"
-                        name="city"
-                      autoComplete="address-level2"
-                        value={formData.city}
-                        onChange={handleInputChange}
-                        className="ship-input"
-                        placeholder="New York"
-                        required
-                      />
-                    </div>
-                    <div>
-                      <label htmlFor="shipping-state" className="ship-label">
-                        {IS_UK_STOREFRONT ? 'County' : 'State/Province'} <span className="text-red-500" aria-hidden>*</span>
-                      </label>
-                      <input
-                        type="text"
-                        id="shipping-state"
-                        name="state"
-                      autoComplete="address-level1"
-                        value={formData.state}
-                        onChange={handleInputChange}
-                        className="ship-input"
-                        placeholder={IS_UK_STOREFRONT ? 'Greater London' : 'NY'}
-                        required
-                      />
-                    </div>
-                    <div>
-                      <label htmlFor="shipping-postal-code" className="ship-label">
-                        Postal Code <span className="text-red-500" aria-hidden>*</span>
-                      </label>
-                      <input
-                        type="text"
-                        id="shipping-postal-code"
-                        name="postal_code"
-                      autoComplete="postal-code"
-                        value={formData.postal_code}
-                        onChange={handleInputChange}
-                        className="ship-input"
-                        placeholder={IS_UK_STOREFRONT ? 'SW1A 1AA' : '10001'}
-                        required
-                      />
-                    </div>
+                </div>
+                <div>
+                  <label htmlFor="shipping-state" className="sr-only">State</label>
+                  <div className="ship-field">
+                    <Map size={18} className="ship-field-icon" aria-hidden="true" />
+                    <input type="text" id="shipping-state" name="state" value={formData.state} onChange={handleInputChange} className="ship-input ship-input--icon" placeholder="State / Province *" required />
                   </div>
-                  <div>
-                    <label htmlFor="shipping-country" className="ship-label">
-                      Country <span className="text-red-500" aria-hidden>*</span>
-                    </label>
-                    <select
-                      id="shipping-country"
-                      name="country"
-                      value={formData.country}
-                      onChange={handleInputChange}
-                      className="ship-input"
-                      disabled={IS_UK_STOREFRONT}
-                      required
-                    >
+                </div>
+                <div>
+                  <label htmlFor="shipping-postal-code" className="sr-only">Postal Code</label>
+                  <div className="ship-field">
+                    <Mail size={18} className="ship-field-icon" aria-hidden="true" />
+                    <input type="text" id="shipping-postal-code" name="postal_code" value={formData.postal_code} onChange={handleInputChange} className="ship-input ship-input--icon" placeholder="Postal / ZIP Code *" required />
+                  </div>
+                </div>
+                <div>
+                  <label htmlFor="shipping-country" className="sr-only">Country</label>
+                  <div className="ship-field">
+                    <MapPin size={18} className="ship-field-icon" aria-hidden="true" />
+                    <select id="shipping-country" name="country" value={formData.country} onChange={handleInputChange}
+                      className="ship-input ship-input--icon" disabled={IS_UK_STOREFRONT} required>
                       {IS_UK_STOREFRONT ? (
                         <option value={STOREFRONT_COUNTRY_NAME}>{STOREFRONT_COUNTRY_NAME}</option>
                       ) : (
@@ -978,22 +898,10 @@ const ShippingAddressPage: React.FC = () => {
                   </div>
                 </div>
               </div>
-
-              {/* Delivery Notes */}
-              <div>
-                <label htmlFor="shipping-notes" className="ship-label">
-                  Delivery Notes (Optional)
-                </label>
-                <textarea
-                  id="shipping-notes"
-                  name="delivery_notes"
-                  value={formData.delivery_notes}
-                  onChange={handleInputChange}
-                  rows={3}
-                  className="ship-input resize-none"
-                  placeholder="Any special instructions for delivery..."
-                />
-              </div>
+              <label className="flex items-center gap-2 pt-1 text-sm text-slate-700">
+                <input type="checkbox" checked={setAsDefault} onChange={(e) => setSetAsDefault(e.target.checked)} className="h-5 w-5 accent-[#6D28D9]" />
+                Set as default address
+              </label>
 
               {error && (
                 <div className="bg-red-50 border border-red-200 rounded-xl px-4 py-3 text-red-700">
@@ -1028,9 +936,9 @@ const ShippingAddressPage: React.FC = () => {
               <button
                 type="submit"
                 disabled={isLoading || pricingLoading || publicPriceLoading || hasUnresolvedPublicPrices || fxUnavailableForCheckout}
-                className="ship-primary-btn"
+                className="ship-primary-btn flex items-center justify-center gap-2"
               >
-                {isLoading ? 'Saving...' : (pricingLoading || publicPriceLoading || hasUnresolvedPublicPrices) ? 'Refreshing Shipping...' : 'Continue to review order →'}
+                <Save size={18} /> {isLoading ? 'Saving...' : (pricingLoading || publicPriceLoading || hasUnresolvedPublicPrices) ? 'Refreshing Shipping...' : 'Save Address'}
               </button>
             </form>
           )}

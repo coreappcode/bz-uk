@@ -94,12 +94,12 @@ describe('checkout shipping addresses', () => {
   it('opens the new address form on request and keeps a draft when returning to saved addresses', async () => {
     renderPage();
     fireEvent.click(await screen.findByRole('button', { name: 'Add New' }));
-    const street = screen.getByPlaceholderText('123 Main Street');
+    const street = screen.getByLabelText(/street address/i);
     fireEvent.change(street, { target: { value: 'New Road' } });
-    fireEvent.click(screen.getByRole('button', { name: /Back to saved addresses/ }));
+    fireEvent.click(screen.getByRole('tab', { name: /Saved Addresses/ }));
     expect(screen.getByText(/12 High Street/)).toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: 'Add New' }));
-    expect(screen.getByPlaceholderText('123 Main Street')).toHaveValue('New Road');
+    expect(screen.getByLabelText(/street address/i)).toHaveValue('New Road');
   });
 
   it('keeps another selected saved address when the new address form is opened and closed', async () => {
@@ -110,7 +110,7 @@ describe('checkout shipping addresses', () => {
     renderPage();
     fireEvent.click(await screen.findByRole('radio', { name: /24 Park Road/ }));
     fireEvent.click(screen.getByRole('button', { name: 'Add New' }));
-    fireEvent.click(screen.getByRole('button', { name: /Back to saved addresses/ }));
+    fireEvent.click(screen.getByRole('tab', { name: /Saved Addresses/ }));
     expect(screen.getByRole('radio', { name: /24 Park Road/ })).toBeChecked();
     await waitFor(() => expect(mocks.pricing).toHaveBeenLastCalledWith(expect.objectContaining({
       destinationPostalCode: 'M1 1AE',
@@ -133,7 +133,7 @@ describe('checkout shipping addresses', () => {
     expect(await screen.findByText(/no saved addresses yet/i)).toBeInTheDocument();
     expect(await screen.findByRole('button', { name: 'Continue to review' })).toBeDisabled();
     fireEvent.click(screen.getByRole('button', { name: 'Add a new address' }));
-    expect(screen.getByPlaceholderText('123 Main Street')).toBeInTheDocument();
+    expect(screen.getByLabelText(/street address/i)).toBeInTheDocument();
   });
 
   it('shows a retryable error instead of presenting a failed lookup as an empty list', async () => {
