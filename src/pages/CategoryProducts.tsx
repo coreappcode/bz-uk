@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useEffect, useCallback } from 'react';
+import React, { useState, useMemo, useEffect, useCallback, useRef } from 'react';
 import { useParams, useNavigate, Link } from 'react-router-dom';
 import { StorefrontHeader } from '../components/layout/StorefrontHeader';
 import { Footer } from '../components/layout/Footer';
@@ -9,7 +9,7 @@ import {
   Grid3X3, LayoutList, ChevronDown, AlertCircle
 } from 'lucide-react';
 import { ProductGridSkeleton } from '../components/common/Skeleton';
-import { fetchCategoryContext, fetchProducts } from '../lib/productService';
+import { fetchCategoryContext, fetchCategoryMaxPrice, fetchProducts } from '../lib/productService';
 import { fetchPublicProductPrices } from '../lib/pricingService';
 import { useCurrency } from '../contexts/CurrencyContext';
 import { useAuth } from '../contexts/AuthContext';
@@ -31,6 +31,8 @@ interface FilterOptions {
   sortBy: 'featured' | 'price-low-high' | 'price-high-low' | 'rating' | 'newest';
 }
 
+const PAGE_SIZE = 25;
+
 export const CategoryProducts: React.FC = () => {
   const { categoryId } = useParams<{ categoryId: string }>();
   const navigate = useNavigate();
@@ -44,6 +46,20 @@ export const CategoryProducts: React.FC = () => {
   const [parentById, setParentById] = useState<Record<string, string | null>>({});
   const [products, setProducts] = useState<any[]>([]);
   const [fetchError, setFetchError] = useState<string | null>(null);
+  const [context, setContext] = useState<{ routeId: string; ids: string[]; names: Record<string, string> } | null>(null);
+  const [dynamicPriceMax, setDynamicPriceMax] = useState(100000);
+  const [priceRangeReady, setPriceRangeReady] = useState(false);
+  const [priceFilter, setPriceFilter] = useState<{ min: number; max?: number }>({ min: 0 });
+  const [hasMore, setHasMore] = useState(false);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const [pageError, setPageError] = useState<string | null>(null);
+  const [sentinel, setSentinel] = useState<HTMLDivElement | null>(null);
+  const requestGeneration = useRef(0);
+  const nextOffset = useRef(0);
+  const pageInFlight = useRef(false);
+  const priceCache = useRef<{ key: string; prices: Record<string, number>; mrps: Record<string, number>; fetched: Set<string> }>({
+    key: '', prices: {}, mrps: {}, fetched: new Set(),
+  });
   const [publicPriceMap, setPublicPriceMap] = useState<Record<string, number>>({});
   const [publicMrpMap, setPublicMrpMap] = useState<Record<string, number>>({});
   const [publicPriceLoading, setPublicPriceLoading] = useState(false);
@@ -63,14 +79,17 @@ export const CategoryProducts: React.FC = () => {
     userCountry: user?.country || '',
   });
 
-  // Load category context + products
   useEffect(() => {
     if (!categoryId) return;
     let cancelled = false;
     const load = async () => {
       setLoading(true);
       setFetchError(null);
-      setFilters(prev => ({ ...prev, selectedSubcategory: null }));
+      setContext(null);
+      setProducts([]);
+      setPriceRangeReady(false);
+      setPriceFilter({ min: 0 });
+      setFilters(prev => ({ ...prev, priceRange: [0, 100000], selectedSubcategory: null }));
 
       try {
         const ctx = await fetchCategoryContext(categoryId);
@@ -81,45 +100,115 @@ export const CategoryProducts: React.FC = () => {
           setParentCategory(ctx.parent);
           setSubcategories(ctx.children);
           setParentById(ctx.parentById || {});
+          setDynamicPriceMax(100000);
+          setContext({ routeId: categoryId, ids: ctx.allCategoryIds, names: ctx.categoryNames || {} });
 
-          const { data: prods, error } = await fetchProducts({
-            categoryIds: ctx.allCategoryIds,
-            approvalStatus: 'approved',
-            isActive: true,
-            limit: 500,
-            resolveCategoryNames: false,
-            includeCount: false,
-          });
+          const { maxPrice, error } = await fetchCategoryMaxPrice(ctx.allCategoryIds);
           if (cancelled) return;
           if (error) throw new Error(error);
-
-          // Enrich products with resolved category names
-          const enriched = (prods || []).map((p: any) => ({
-            ...p,
-            category_name: ctx.categoryNames?.[p.category] || '',
-            sub_category_name: ctx.categoryNames?.[p.sub_category] || '',
-            product_type_name: ctx.categoryNames?.[p.product_type] || '',
-          }));
-          setProducts(enriched);
+          const ceiling = Math.ceil(maxPrice / 500) * 500 || 100000;
+          setDynamicPriceMax(ceiling);
+          setFilters(prev => ({ ...prev, priceRange: [0, ceiling] }));
+          setPriceRangeReady(true);
         } else {
           setCategory(null);
+          setContext(null);
           setParentById({});
           setProducts([]);
+          setLoading(false);
         }
       } catch (err) {
         if (cancelled) return;
         console.error('Error loading category:', err);
         setFetchError('Failed to load products. Please try again.');
         setCategory(null);
+        setContext(null);
         setParentById({});
         setProducts([]);
+        setLoading(false);
       }
-
-      if (!cancelled) setLoading(false);
     };
     void load();
     return () => { cancelled = true; };
   }, [categoryId]);
+
+  const loadPage = useCallback(async (generation: number, offset: number) => {
+    if (!context || context.routeId !== categoryId || pageInFlight.current) return;
+    pageInFlight.current = true;
+    if (offset > 0) setLoadingMore(true);
+    setPageError(null);
+    try {
+      const { data, error } = await fetchProducts({
+        categoryIds: context.ids,
+        subcategoryId: filters.selectedSubcategory || undefined,
+        minPrice: priceFilter.min,
+        maxPrice: priceFilter.max,
+        minRating: filters.rating || undefined,
+        inStock: filters.inStock,
+        sortBy: filters.sortBy,
+        stableOrder: true,
+        approvalStatus: 'approved',
+        isActive: true,
+        limit: PAGE_SIZE,
+        offset,
+        resolveCategoryNames: false,
+        includeCount: false,
+      });
+      if (generation !== requestGeneration.current) return;
+      if (error) throw new Error(error);
+      const enriched = data.map((p: any) => ({
+        ...p,
+        category_name: context.names[p.category] || '',
+        sub_category_name: context.names[p.sub_category] || '',
+        product_type_name: context.names[p.product_type] || '',
+      }));
+      setProducts(prev => offset === 0 ? enriched : [...prev, ...enriched]);
+      nextOffset.current = offset + data.length;
+      setHasMore(data.length === PAGE_SIZE);
+    } catch (err) {
+      if (generation !== requestGeneration.current) return;
+      console.error('Error loading category products:', err);
+      if (offset === 0) setFetchError('Failed to load products. Please try again.');
+      else setPageError('Failed to load more products. Please try again.');
+    } finally {
+      if (generation === requestGeneration.current) {
+        pageInFlight.current = false;
+        setLoading(false);
+        setLoadingMore(false);
+      }
+    }
+  }, [categoryId, context, filters.inStock, filters.rating, filters.selectedSubcategory, filters.sortBy, priceFilter]);
+
+  useEffect(() => {
+    const generation = ++requestGeneration.current;
+    pageInFlight.current = false;
+    nextOffset.current = 0;
+    setHasMore(false);
+    setLoadingMore(false);
+    setPageError(null);
+    if (!context || context.routeId !== categoryId) return;
+    setLoading(true);
+    setFetchError(null);
+    setProducts([]);
+    void loadPage(generation, 0);
+    const generationRef = requestGeneration;
+    return () => { generationRef.current++; };
+  }, [categoryId, context, loadPage]);
+
+  const loadMore = useCallback(() => {
+    if (hasMore && !loadingMore && !pageError) {
+      void loadPage(requestGeneration.current, nextOffset.current);
+    }
+  }, [hasMore, loadingMore, pageError, loadPage]);
+
+  useEffect(() => {
+    if (!sentinel || !hasMore || loadingMore || pageError || typeof IntersectionObserver === 'undefined') return;
+    const observer = new IntersectionObserver(entries => {
+      if (entries.some(entry => entry.isIntersecting)) loadMore();
+    }, { rootMargin: '200px' });
+    observer.observe(sentinel);
+    return () => observer.disconnect();
+  }, [sentinel, hasMore, loadingMore, pageError, loadMore]);
 
   useEffect(() => {
     let cancelled = false;
@@ -138,103 +227,41 @@ export const CategoryProducts: React.FC = () => {
         return;
       }
 
+      const key = `${categoryId}:${selectedCountry}`;
+      if (priceCache.current.key !== key) {
+        priceCache.current = { key, prices: {}, mrps: {}, fetched: new Set() };
+      }
+      const cache = priceCache.current;
+      const ids = products.map(p => p.id).filter(id => !cache.fetched.has(id));
+      setPublicPriceMap({ ...cache.prices });
+      setPublicMrpMap({ ...cache.mrps });
+      if (ids.length === 0) {
+        setPublicPriceLoading(false);
+        return;
+      }
       setPublicPriceLoading(true);
       const { data, error } = await fetchPublicProductPrices(
-        products.map((p) => p.id),
+        ids,
         selectedCountry
       );
       if (cancelled) return;
       if (error) console.error('Failed to load category product prices:', error);
 
-      const map: Record<string, number> = {};
-      const mrpMap: Record<string, number> = {};
       (data || []).forEach((item) => {
-        map[item.productId] = item.publicUnitPrice;
-        if (item.markupMrp > 0) mrpMap[item.productId] = item.markupMrp;
+        cache.prices[item.productId] = item.publicUnitPrice;
+        if (item.markupMrp > 0) cache.mrps[item.productId] = item.markupMrp;
       });
-
-      setPublicPriceMap(map);
-      setPublicMrpMap(mrpMap);
+      if (!error) ids.forEach(id => cache.fetched.add(id));
+      setPublicPriceMap({ ...cache.prices });
+      setPublicMrpMap({ ...cache.mrps });
       setPublicPriceLoading(false);
     };
 
     void loadPublicPrices();
     return () => { cancelled = true; };
-  }, [products, selectedCountry]);
+  }, [categoryId, products, selectedCountry]);
 
-  // Compute dynamic price ceiling from loaded products
-  const dynamicPriceMax = useMemo(() => {
-    if (products.length === 0) return 100000;
-    const maxPrice = Math.max(...products.map((p) => p.price || 0));
-    // Round up to a nice step boundary
-    return Math.ceil(maxPrice / 500) * 500 || 100000;
-  }, [products]);
-
-  // Reset price range when products change (new category loaded)
-  useEffect(() => {
-    setFilters(prev => ({ ...prev, priceRange: [0, dynamicPriceMax] }));
-  }, [dynamicPriceMax]);
-
-  // Filter + sort products
-  const filteredProducts = useMemo(() => {
-    let filtered = [...products];
-
-    // Subcategory filter
-    if (filters.selectedSubcategory) {
-      filtered = filtered.filter(
-        (p) =>
-          p.category === filters.selectedSubcategory ||
-          p.sub_category === filters.selectedSubcategory ||
-          p.product_type === filters.selectedSubcategory
-      );
-    }
-
-    // Price filter
-    filtered = filtered.filter(
-      (p) => p.price >= filters.priceRange[0] && p.price <= filters.priceRange[1]
-    );
-
-    // Rating filter
-    if (filters.rating) {
-      filtered = filtered.filter((p) => (p.rating || 0) >= filters.rating!);
-    }
-
-    // Stock filter
-    if (filters.inStock) {
-      filtered = filtered.filter((p) => p.stock > 0);
-    }
-
-    // Sort
-    switch (filters.sortBy) {
-      case 'price-low-high':
-        filtered.sort((a, b) => a.price - b.price);
-        break;
-      case 'price-high-low':
-        filtered.sort((a, b) => b.price - a.price);
-        break;
-      case 'rating':
-        filtered.sort((a, b) => (b.rating || 0) - (a.rating || 0));
-        break;
-      case 'newest':
-        filtered.sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
-        break;
-      default:
-        break;
-    }
-
-    return filtered;
-  }, [products, filters]);
-
-  // Compute product counts per subcategory
-  const subcategoryCounts = useMemo(() => {
-    const counts: Record<string, number> = {};
-    for (const sub of subcategories) {
-      counts[sub.id] = products.filter(
-        (p) => p.category === sub.id || p.sub_category === sub.id || p.product_type === sub.id
-      ).length;
-    }
-    return counts;
-  }, [products, subcategories]);
+  const filteredProducts = products;
 
   // Get unique brands from products for display
   const brands = useMemo(() => {
@@ -345,13 +372,18 @@ export const CategoryProducts: React.FC = () => {
   const handlePriceChange = (type: 'min' | 'max', value: number) => {
     const [min, max] = filters.priceRange;
     if (type === 'min') {
-      setFilters((prev) => ({ ...prev, priceRange: [Math.min(value, max), max] }));
+      const nextMin = Math.min(value, max);
+      setFilters((prev) => ({ ...prev, priceRange: [nextMin, max] }));
+      setPriceFilter({ min: nextMin, max: max < dynamicPriceMax ? max : undefined });
     } else {
-      setFilters((prev) => ({ ...prev, priceRange: [min, Math.max(value, min)] }));
+      const nextMax = Math.max(value, min);
+      setFilters((prev) => ({ ...prev, priceRange: [min, nextMax] }));
+      setPriceFilter({ min, max: nextMax < dynamicPriceMax ? nextMax : undefined });
     }
   };
 
   const resetFilters = () => {
+    setPriceFilter({ min: 0 });
     setFilters({
       priceRange: [0, dynamicPriceMax],
       rating: null,
@@ -399,7 +431,7 @@ export const CategoryProducts: React.FC = () => {
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4">
           <h1 className="text-xl md:text-2xl font-bold text-gray-900">{category.name}</h1>
           <p className="text-sm text-gray-500 mt-0.5">
-            {filteredProducts.length} result{filteredProducts.length !== 1 ? 's' : ''}
+            Showing {filteredProducts.length} result{filteredProducts.length !== 1 ? 's' : ''}{hasMore ? ' (more available)' : ''}
           </p>
         </div>
       </div>
@@ -435,9 +467,6 @@ export const CategoryProducts: React.FC = () => {
                   }`}
                 >
                   {sub.name}
-                  {subcategoryCounts[sub.id] > 0 && (
-                    <span className="ml-1.5 text-xs opacity-60">({subcategoryCounts[sub.id]})</span>
-                  )}
                 </button>
               ))}
             </div>
@@ -544,7 +573,6 @@ export const CategoryProducts: React.FC = () => {
                         >
                           {sub.name}
                         </button>
-                        <span className="text-xs text-gray-400">{subcategoryCounts[sub.id] || 0}</span>
                       </li>
                     ))}
                   </ul>
@@ -554,6 +582,7 @@ export const CategoryProducts: React.FC = () => {
               {/* Price Range */}
               <div className="border-t border-gray-200 pt-4">
                 <h3 className="text-xs font-bold text-gray-900 uppercase tracking-wide mb-3">Price</h3>
+                {!priceRangeReady && <p className="text-xs text-gray-500 mb-2">Loading price range...</p>}
                 <div className="space-y-3">
                   <div>
                     <label className="text-xs text-gray-500 mb-1 block">
@@ -561,6 +590,7 @@ export const CategoryProducts: React.FC = () => {
                     </label>
                     <input
                       type="range"
+                      disabled={!priceRangeReady}
                       min="0"
                       max={dynamicPriceMax}
                       step="500"
@@ -575,6 +605,7 @@ export const CategoryProducts: React.FC = () => {
                     </label>
                     <input
                       type="range"
+                      disabled={!priceRangeReady}
                       min="0"
                       max={dynamicPriceMax}
                       step="500"
@@ -629,7 +660,7 @@ export const CategoryProducts: React.FC = () => {
               {/* Brands list */}
               {brands.length > 0 && (
                 <div className="border-t border-gray-200 pt-4">
-                  <h3 className="text-xs font-bold text-gray-900 uppercase tracking-wide mb-2">Brand</h3>
+                  <h3 className="text-xs font-bold text-gray-900 uppercase tracking-wide mb-2">Brands in loaded products</h3>
                   <ul className="space-y-1 max-h-40 overflow-y-auto">
                     {brands.slice(0, 15).map((b) => (
                       <li key={b} className="text-sm text-gray-600">{b}</li>
@@ -669,7 +700,7 @@ export const CategoryProducts: React.FC = () => {
               </div>
             ) : (
               <>
-                {!filters.selectedSubcategory && subcategories.length > 0 ? (
+                {!filters.selectedSubcategory && filters.sortBy === 'featured' && subcategories.length > 0 ? (
                   <div className="space-y-8">
                     {subcategoryProductSections.map((section) => (
                       <section key={section.subcategory.id} className="space-y-3">
@@ -678,7 +709,7 @@ export const CategoryProducts: React.FC = () => {
                             {section.subcategory.name}
                           </h2>
                           <span className="text-xs text-gray-500">
-                            {section.products.length} product{section.products.length !== 1 ? 's' : ''}
+                            {section.products.length} loaded product{section.products.length !== 1 ? 's' : ''}
                           </span>
                         </div>
 
@@ -708,7 +739,7 @@ export const CategoryProducts: React.FC = () => {
                         <div className="flex items-end justify-between border-b border-gray-200 pb-2">
                           <h2 className="text-base md:text-lg font-bold text-gray-900">Other in {category.name}</h2>
                           <span className="text-xs text-gray-500">
-                            {uncategorizedProducts.length} product{uncategorizedProducts.length !== 1 ? 's' : ''}
+                            {uncategorizedProducts.length} loaded product{uncategorizedProducts.length !== 1 ? 's' : ''}
                           </span>
                         </div>
 
@@ -754,6 +785,23 @@ export const CategoryProducts: React.FC = () => {
                   </div>
                 )}
               </>
+            )}
+            {hasMore && (
+              <div ref={setSentinel} className="py-6 text-center" aria-live="polite">
+                {loadingMore ? (
+                  <p className="text-sm text-gray-500">Loading more products...</p>
+                ) : (
+                  <>
+                    {pageError && <p className="text-sm text-red-600 mb-2">{pageError}</p>}
+                    <button
+                      onClick={() => void loadPage(requestGeneration.current, nextOffset.current)}
+                      className="px-5 py-2 text-sm font-semibold text-amber-700 border border-amber-500 rounded-lg hover:bg-amber-50"
+                    >
+                      {pageError ? 'Try again' : 'Load more products'}
+                    </button>
+                  </>
+                )}
+              </div>
             )}
           </div>
         </div>
@@ -803,7 +851,7 @@ export const CategoryProducts: React.FC = () => {
                             filters.selectedSubcategory === sub.id ? 'text-amber-600 font-semibold' : 'text-gray-600'
                           }`}
                         >
-                          {sub.name} ({subcategoryCounts[sub.id] || 0})
+                          {sub.name}
                         </button>
                       </li>
                     ))}
@@ -820,7 +868,7 @@ export const CategoryProducts: React.FC = () => {
                       Min: {formatPrice(filters.priceRange[0])}
                     </label>
                     <input
-                      type="range" min="0" max={dynamicPriceMax} step="500"
+                      type="range" min="0" max={dynamicPriceMax} step="500" disabled={!priceRangeReady}
                       value={filters.priceRange[0]}
                       onChange={(e) => handlePriceChange('min', Number(e.target.value))}
                       className="w-full h-1.5 bg-gray-200 rounded-full appearance-none cursor-pointer accent-amber-500"
@@ -831,7 +879,7 @@ export const CategoryProducts: React.FC = () => {
                       Max: {formatPrice(filters.priceRange[1])}
                     </label>
                     <input
-                      type="range" min="0" max={dynamicPriceMax} step="500"
+                      type="range" min="0" max={dynamicPriceMax} step="500" disabled={!priceRangeReady}
                       value={filters.priceRange[1]}
                       onChange={(e) => handlePriceChange('max', Number(e.target.value))}
                       className="w-full h-1.5 bg-gray-200 rounded-full appearance-none cursor-pointer accent-amber-500"

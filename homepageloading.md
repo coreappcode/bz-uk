@@ -253,15 +253,25 @@ descendant IDs are repeated in three filters. Timings and category sizes vary.
 
 The category-loading implementation starts the category lookup and the
 category-tree fetch concurrently. It reuses the already-fetched tree for category names instead of
-performing another names query, skips an unused exact product count, and marks
-category product images for lazy loading. The existing 500-product limit,
-product data, grouping and client-side filters remain unchanged. Failed
-category/product queries show an error instead of being presented as empty
-results, and obsolete responses from previous category navigations are ignored.
-These changes do not eliminate the large product response or long URL; reducing
-them safely requires a separately designed server-side API and pagination that
-preserve filters and access controls. Verify the Amplify deployment status
-separately before assuming these changes are live.
+performing another names query, skips an exact product count, and marks category
+product images for lazy loading. Products are now fetched in batches of 25.
+An intersection observer loads the next batch near the bottom, with a manual
+load-more button as a fallback and a retry button for failed subsequent batches.
+An exact multiple of 25 requires one additional empty request to determine the end.
+
+Filtering and sorting run on the product query before pagination, using the same
+product price, rating, stock and category fields as before. Price range bounds
+come from a separate highest-price query that runs alongside the first product
+request. Ordering includes a unique ID tie-breaker, although offset pagination
+can still shift if products are inserted or removed between requests. The page
+shows the number of loaded results rather than an exact total; the brand list
+and section counts likewise describe loaded products. Featured products retain
+subcategory grouping; other sort choices use a single list so their ordering is
+visible across the whole category. Failed category/product queries show an
+error, and obsolete responses from previous categories or filters are ignored.
+These changes reduce product data transferred initially but do not shorten the
+category-filter URL. Verify deployment and measure performance separately
+before assuming the changes are live or quantifying the improvement.
 
 Direct navigation to `/category/fashion` was observed redirecting to
 `/category/fashion/` with HTTP 404, even though the response included the app

@@ -147,6 +147,13 @@ export async function fetchProducts(filters?: {
   excludeDrafts?: boolean;
   resolveCategoryNames?: boolean;
   includeCount?: boolean;
+  subcategoryId?: string;
+  minPrice?: number;
+  maxPrice?: number;
+  minRating?: number;
+  inStock?: boolean;
+  sortBy?: 'featured' | 'price-low-high' | 'price-high-low' | 'rating' | 'newest';
+  stableOrder?: boolean;
 }) {
   let query = supabase.from('products').select(
     '*',
@@ -172,6 +179,15 @@ export async function fetchProducts(filters?: {
   }
   if (filters?.approvalStatus) query = query.eq('approval_status', filters.approvalStatus);
   if (filters?.isActive !== undefined) query = query.eq('is_active', filters.isActive);
+  if (filters?.subcategoryId) {
+    query = query.or(
+      `category.eq.${filters.subcategoryId},sub_category.eq.${filters.subcategoryId},product_type.eq.${filters.subcategoryId}`
+    );
+  }
+  if (filters?.minPrice !== undefined) query = query.gte('price', filters.minPrice);
+  if (filters?.maxPrice !== undefined) query = query.lte('price', filters.maxPrice);
+  if (filters?.minRating !== undefined) query = query.gte('rating', filters.minRating);
+  if (filters?.inStock) query = query.gt('stock', 0);
   if (filters?.search) {
     const safe = filters.search.replace(/[\\%_(),.*]/g, '').trim().substring(0, 200);
     if (safe) {
@@ -188,7 +204,15 @@ export async function fetchProducts(filters?: {
     }
   }
 
+  if (filters?.sortBy === 'price-low-high') {
+    query = query.order('price', { ascending: true });
+  } else if (filters?.sortBy === 'price-high-low') {
+    query = query.order('price', { ascending: false });
+  } else if (filters?.sortBy === 'rating') {
+    query = query.order('rating', { ascending: false, nullsFirst: false });
+  }
   query = query.order('created_at', { ascending: false });
+  if (filters?.stableOrder) query = query.order('id', { ascending: false });
 
   const limit = filters?.limit || 100;
   const offset = filters?.offset || 0;
@@ -218,6 +242,18 @@ export async function fetchProducts(filters?: {
   }
 
   return { data: products, error: error?.message || null, count: count || 0 };
+}
+
+export async function fetchCategoryMaxPrice(categoryIds: string[]) {
+  const { data, error } = await supabase
+    .from('products')
+    .select('price')
+    .or(`category.in.(${categoryIds.join(',')}),sub_category.in.(${categoryIds.join(',')}),product_type.in.(${categoryIds.join(',')})`)
+    .eq('approval_status', 'approved')
+    .eq('is_active', true)
+    .order('price', { ascending: false })
+    .limit(1);
+  return { maxPrice: Number(data?.[0]?.price || 0), error: error?.message || null };
 }
 
 export async function searchPublicProductsByKeywords(
