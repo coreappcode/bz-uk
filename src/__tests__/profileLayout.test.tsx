@@ -80,4 +80,32 @@ describe('profile account layout', () => {
     expect(await screen.findByText('Failed to load addresses. Please try again.')).toBeInTheDocument();
     expect(screen.queryByText('No saved addresses')).not.toBeInTheDocument();
   });
+
+  it('on compact screens shows an accordion without breadcrumb and caches the loaded profile', async () => {
+    const originalMatchMedia = window.matchMedia;
+    window.matchMedia = ((query: string) => ({
+      matches: true, media: query, addEventListener: vi.fn(), removeEventListener: vi.fn(),
+    })) as unknown as typeof window.matchMedia;
+    try {
+      const view = render(<MemoryRouter><Profile /></MemoryRouter>);
+      const personal = await screen.findByRole('button', { name: 'Personal Information' });
+      expect(screen.queryByLabelText('Breadcrumb')).not.toBeInTheDocument();
+      expect(personal).toHaveAttribute('aria-expanded', 'false');
+      fireEvent.click(personal);
+      expect(personal).toHaveAttribute('aria-expanded', 'true');
+      fireEvent.click(personal);
+      expect(personal).toHaveAttribute('aria-expanded', 'false');
+      fireEvent.click(screen.getByRole('button', { name: 'My Orders' }));
+      expect(mocks.navigate).toHaveBeenCalledWith('/orders');
+      const buttons = screen.getAllByRole('button').map((b) => b.textContent);
+      expect(buttons[buttons.length - 1]).toBe('Logout');
+      await waitFor(() => expect(localStorage.getItem('beauzead_profile_cache_v1')).toContain('buyer@example.com'));
+
+      view.unmount();
+      render(<MemoryRouter><Profile /></MemoryRouter>);
+      expect(screen.getByRole('button', { name: 'Personal Information' })).toBeInTheDocument();
+    } finally {
+      window.matchMedia = originalMatchMedia;
+    }
+  });
 });

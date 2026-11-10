@@ -1,13 +1,14 @@
 import React, { useState, useEffect, useRef } from 'react';
 import logger from '../../utils/logger';
 import { useNavigate, useSearchParams } from 'react-router-dom';
-import { LogOut, CheckCircle, X, Trash2, Home, Briefcase, MapPin, Plus, Shield, User, Lock, Key, Download, Edit2, ChevronRight, Package, Heart, Bell, HelpCircle } from 'lucide-react';
+import { LogOut, CheckCircle, X, Trash2, Home, Briefcase, MapPin, Plus, Shield, User, Lock, Key, Download, Edit2, ChevronRight, ChevronDown, ChevronUp, Package, Heart, Bell, HelpCircle } from 'lucide-react';
 import { useAuth } from '../../contexts/AuthContext';
 import { supabase } from '../../lib/supabase';
 import { getUserAddresses, deleteUserAddress } from '../../lib/adminService';
 import { Header } from '../../components/layout/Header';
-import { Footer } from '../../components/layout/Footer';
 import { MobileNav } from '../../components/layout/MobileNav';
+import { readProfileCache, updateProfileCache, isFresh, clearProfileCache } from '../../lib/profileCache';
+import { cachedQuery, QUERY_TTL } from '../../lib/queryCache';
 import { Skeleton, FormSkeleton, ListSkeleton } from '../../components/common/Skeleton';
 
 interface CountryOption {
@@ -51,7 +52,8 @@ export const Profile: React.FC = () => {
     setSearchParams(section === 'personal' ? {} : { section }, { replace: true });
   };
   const { user, currentAuthUser, loading: authLoading, signOut } = useAuth();
-  const [loading, setLoading] = useState(true);
+  const [initialCache] = useState(readProfileCache);
+  const [loading, setLoading] = useState(!initialCache?.profile);
   const [saving, setSaving] = useState(false);
   const [editingField, setEditingField] = useState<EditingField>(null);
   const [error, setError] = useState<string | null>(null);
@@ -63,8 +65,8 @@ export const Profile: React.FC = () => {
   const [confirmLogout, setConfirmLogout] = useState(false);
   const [confirmDeleteAccount, setConfirmDeleteAccount] = useState(false);
   const [deleteAcknowledged, setDeleteAcknowledged] = useState(false);
-  const [addresses, setAddresses] = useState<ProfileAddress[]>([]);
-  const [addressesLoading, setAddressesLoading] = useState(true);
+  const [addresses, setAddresses] = useState<ProfileAddress[]>(() => (initialCache?.addresses || []) as ProfileAddress[]);
+  const [addressesLoading, setAddressesLoading] = useState(!initialCache?.addresses);
   const [addressesError, setAddressesError] = useState(false);
   const [addressToDelete, setAddressToDelete] = useState<ProfileAddress | null>(null);
   const [deletingAddress, setDeletingAddress] = useState(false);
@@ -73,13 +75,42 @@ export const Profile: React.FC = () => {
   const locationLockedCountryNameRef = useRef('');
   const countryLockAppliedRef = useRef('');
 
-  const [profileData, setProfileData] = useState({
+  const [profileData, setProfileData] = useState(() => initialCache?.profile || {
     name: '',
     email: '',
     phone: '',
     country: '',
     countryId: '',
   });
+  const userId = user?.id || currentAuthUser?.userId || '';
+  const profileHydratedRef = useRef(Boolean(initialCache?.profile));
+  const addressesHydratedRef = useRef(Boolean(initialCache?.addresses));
+  const [isCompact, setIsCompact] = useState(() =>
+    typeof window !== 'undefined' && typeof window.matchMedia === 'function'
+      && window.matchMedia('(max-width: 1023px)').matches);
+  const [openSection, setOpenSection] = useState<ProfileSection | null>(
+    sectionParam && PROFILE_SECTIONS.includes(sectionParam) ? sectionParam : null,
+  );
+
+  useEffect(() => {
+    if (typeof window.matchMedia !== 'function') return;
+    const query = window.matchMedia('(max-width: 1023px)');
+    const onChange = () => setIsCompact(query.matches);
+    query.addEventListener('change', onChange);
+    return () => query.removeEventListener('change', onChange);
+  }, []);
+
+  // Persist the latest profile so reopening the page doesn't refetch.
+  useEffect(() => {
+    if (userId && profileHydratedRef.current) {
+      updateProfileCache(userId, { profile: profileData, profileAt: Date.now() });
+    }
+  }, [userId, profileData]);
+  useEffect(() => {
+    if (userId && addressesHydratedRef.current && !addressesLoading && !addressesError) {
+      updateProfileCache(userId, { addresses, addressesAt: Date.now() });
+    }
+  }, [userId, addresses, addressesLoading, addressesError]);
 
   // Temp edit values for inline editing
   const [editValue, setEditValue] = useState('');
@@ -128,11 +159,15 @@ export const Profile: React.FC = () => {
   useEffect(() => {
     const loadCountries = async () => {
       try {
-        const { data } = await supabase
-          .from('countries')
-          .select('id, country_name, country_code, short_code, iso2')
-          .eq('is_active', true)
-          .order('country_name');
+        const data = await cachedQuery('profile:countries', QUERY_TTL.categories, async () => {
+          const { data: rows, error: countriesError } = await supabase
+            .from('countries')
+            .select('id, country_name, country_code, short_code, iso2')
+            .eq('is_active', true)
+            .order('country_name');
+          if (countriesError) throw countriesError;
+          return rows;
+        });
         if (data) setCountries(data);
       } catch (err) {
         logger.error(err as Error, { context: 'Failed to load countries' });
@@ -168,15 +203,27 @@ export const Profile: React.FC = () => {
   useEffect(() => {
     const fetchUserProfile = async () => {
       try {
-        setLoading(true);
         if (authLoading) {
           return;
         }
 
-        const userId = user?.id || currentAuthUser?.userId;
         if (!userId) {
           navigate('/login');
           return;
+        }
+
+        const cached = readProfileCache();
+        const cacheMatches = cached?.userId === userId && Boolean(cached.profile);
+        if (cacheMatches && isFresh(cached?.profileAt)) {
+          // Already showing cached data: no refetch, no spinner.
+          profileHydratedRef.current = true;
+          setLoading(false);
+          return;
+        }
+        // Revalidate silently when stale data is already on screen.
+        if (!cacheMatches) {
+          profileHydratedRef.current = false;
+          setLoading(true);
         }
 
         const { data, error: fetchError } = await supabase
@@ -292,6 +339,7 @@ export const Profile: React.FC = () => {
             countryId: locationLockedCountryIdRef.current || resolvedCountryId,
           });
         }
+        profileHydratedRef.current = true;
       } catch (err) {
         logger.error(err as Error, { context: 'Failed to fetch user profile' });
         setError('Failed to load profile data');
@@ -301,26 +349,38 @@ export const Profile: React.FC = () => {
     };
 
     fetchUserProfile();
+  // Keyed on the user id (not the user object) so token refreshes don't refetch.
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [user, currentAuthUser, authLoading, navigate]);
+  }, [userId, authLoading, navigate]);
   // locationLockedCountryId / locationLockedCountryName intentionally omitted — read via refs
   // to prevent re-fetching (and re-blinking) every time location state changes.
 
   useEffect(() => {
     const loadAddresses = async () => {
-      const userId = user?.id || currentAuthUser?.userId;
       if (!userId) {
         setAddresses([]);
         setAddressesLoading(false);
         return;
       }
 
+      const cached = readProfileCache();
+      const cacheMatches = cached?.userId === userId && Array.isArray(cached.addresses);
+      if (cacheMatches && isFresh(cached?.addressesAt)) {
+        addressesHydratedRef.current = true;
+        setAddressesLoading(false);
+        return;
+      }
+
       try {
-        setAddressesLoading(true);
+        if (!cacheMatches) {
+          addressesHydratedRef.current = false;
+          setAddressesLoading(true);
+        }
         setAddressesError(false);
         const { data, error: addressError } = await getUserAddresses(userId);
         if (addressError) throw new Error(addressError);
         setAddresses((data || []) as ProfileAddress[]);
+        addressesHydratedRef.current = true;
       } catch (err) {
         logger.error(err as Error, { context: 'Failed to load profile addresses' });
         setAddresses([]);
@@ -334,7 +394,7 @@ export const Profile: React.FC = () => {
     if (!authLoading) {
       void loadAddresses();
     }
-  }, [user, currentAuthUser, authLoading]);
+  }, [userId, authLoading]);
 
   // Persist locked detected country to profile + auth metadata once user is known.
   // countryLockAppliedRef ensures this only writes to DB once per detected country ID,
@@ -486,6 +546,7 @@ export const Profile: React.FC = () => {
   };
 
   const handleLogout = async () => {
+    clearProfileCache();
     await signOut();
     navigate('/');
   };
@@ -784,7 +845,6 @@ export const Profile: React.FC = () => {
             </div>
           </div>
         </main>
-        <Footer />
         <MobileNav />
       </div>
     );
@@ -797,6 +857,7 @@ export const Profile: React.FC = () => {
       <Header />
       <main className="profile-page-main">
         <div className="profile-page-inner">
+          {!isCompact && (
           <nav className="profile-breadcrumb" aria-label="Breadcrumb">
             <button type="button" onClick={() => navigate('/')} className="profile-breadcrumb-link">Home</button>
             <ChevronRight className="w-3.5 h-3.5 text-slate-400" aria-hidden />
@@ -804,7 +865,74 @@ export const Profile: React.FC = () => {
             <ChevronRight className="w-3.5 h-3.5 text-slate-400" aria-hidden />
             <span className="profile-breadcrumb-current">{meta.title}</span>
           </nav>
+          )}
 
+          {isCompact ? (
+            <div className="acct-accordion">
+              {successMessage && (
+                <div className="auth-alert auth-alert--success mb-3">
+                  <CheckCircle className="h-5 w-5 shrink-0" />
+                  <span className="flex-1">{successMessage}</span>
+                  <button onClick={() => setSuccessMessage(null)} type="button" aria-label="Dismiss">
+                    <X className="h-4 w-4" />
+                  </button>
+                </div>
+              )}
+              {error && editingField === null && (
+                <div className="auth-alert auth-alert--error mb-3">
+                  <span className="flex-1">{error}</span>
+                  <button onClick={() => setError(null)} type="button" aria-label="Dismiss">
+                    <X className="h-4 w-4" />
+                  </button>
+                </div>
+              )}
+              {menuItems.map((item) => {
+                const section = item.section;
+                const isOpen = Boolean(section) && openSection === section;
+                return (
+                  <div key={item.key} className="acct-acc-item">
+                    <button
+                      type="button"
+                      className="acct-acc-head"
+                      aria-expanded={section ? isOpen : undefined}
+                      onClick={() => {
+                        if (!section) {
+                          navigate(item.path as string);
+                          return;
+                        }
+                        setEditingField(null);
+                        setEditValue('');
+                        setError(null);
+                        setOpenSection(isOpen ? null : section);
+                      }}
+                    >
+                      <span className="acct-acc-label">{item.icon}<span>{item.label}</span></span>
+                      {!section
+                        ? <ChevronRight className="w-4 h-4 text-slate-400" aria-hidden />
+                        : isOpen
+                          ? <ChevronUp className="w-5 h-5 text-[#6D28D9]" aria-hidden />
+                          : <ChevronDown className="w-5 h-5 text-slate-400" aria-hidden />}
+                    </button>
+                    {isOpen && (
+                      <div className="acct-acc-body">
+                        {section === 'personal' && renderPersonalSection()}
+                        {section === 'security' && renderSecuritySection()}
+                        {section === 'addresses' && renderAddressesSection()}
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+              <button
+                type="button"
+                onClick={() => setConfirmLogout(true)}
+                data-no-global-confirm="true"
+                className="acct-acc-head acct-acc-logout"
+              >
+                <span className="acct-acc-label"><LogOut className="w-[18px] h-[18px]" /><span>Logout</span></span>
+              </button>
+            </div>
+          ) : (
           <div className="acct-layout">
             <aside className="acct-sidebar" aria-label="Account menu">
               <nav className="acct-menu">
@@ -874,6 +1002,7 @@ export const Profile: React.FC = () => {
               {activeSection === 'addresses' && renderAddressesSection()}
             </section>
           </div>
+          )}
 
           {confirmLogout && (
             <div className="fixed inset-0 z-[70] bg-black/50 flex items-center justify-center p-4 backdrop-blur-sm" role="dialog" aria-modal="true" aria-labelledby="logout-confirm-title">
@@ -981,7 +1110,6 @@ export const Profile: React.FC = () => {
           )}
         </div>
       </main>
-      <Footer />
       <MobileNav />
     </div>
   );

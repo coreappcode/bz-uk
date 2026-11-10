@@ -1,3 +1,4 @@
+import { clearProfileCache } from '../lib/profileCache';
 import React, { createContext, useContext, useState, useEffect } from 'react';
 import type { User } from '../types';
 import { supabase, AUTH_STORAGE_KEY } from '../lib/supabase';
@@ -498,6 +499,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
   const signOut = async () => {
     const roleBeforeSignout = authRole;
+    clearProfileCache();
     try {
       await supabase.auth.signOut();
     } catch (err) {

@@ -1,5 +1,6 @@
 
 import { supabase } from './supabase';
+import { clearProfileCache } from './profileCache';
 import { sanitizeSearchQuery } from '../utils/validation';
 
 // ============================================================
@@ -1109,6 +1110,7 @@ export async function getUserAddresses(userId: string) {
 }
 
 export async function createUserAddress(address: Record<string, unknown>) {
+  clearProfileCache();
   const { data, error } = await supabase
     .from('user_addresses')
     .insert(address)
@@ -1121,6 +1123,7 @@ export async function updateUserAddress(
   addressId: string,
   updates: Record<string, unknown>
 ) {
+  clearProfileCache();
   const { data, error } = await supabase
     .from('user_addresses')
     .update(updates)
@@ -1131,6 +1134,7 @@ export async function updateUserAddress(
 }
 
 export async function deleteUserAddress(addressId: string) {
+  clearProfileCache();
   const { data, error } = await supabase
     .from('user_addresses')
     .delete()
@@ -1146,6 +1150,7 @@ export async function deleteUserAddress(addressId: string) {
 }
 
 export async function setDefaultUserAddress(userId: string, addressId: string) {
+  clearProfileCache();
   // First ensure selected address belongs to this user and is marked default.
   const { error: setError } = await supabase
     .from('user_addresses')
