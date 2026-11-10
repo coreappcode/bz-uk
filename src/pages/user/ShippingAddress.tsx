@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
-import { MapPin, Plus, Check, Loader2 } from 'lucide-react';
+import { MapPin, Plus, Loader2 } from 'lucide-react';
 import { useCart } from '../../contexts/CartContext';
 import { useAuth } from '../../contexts/AuthContext';
 import { Skeleton, ListSkeleton } from '../../components/common/Skeleton';
@@ -67,10 +67,12 @@ const ShippingAddressPage: React.FC = () => {
   const navigate = useNavigate();
   const location = useLocation();
   const { items } = useCart();
-  const { user, currentAuthUser } = useAuth();
+  const { user, currentAuthUser, loading: authLoading } = useAuth();
   const { rates } = useCurrency();
-  const [useExistingAddress, setUseExistingAddress] = useState(false);
+  const [useExistingAddress, setUseExistingAddress] = useState(true);
   const [savedAddresses, setSavedAddresses] = useState<UserAddress[]>([]);
+  const [addressesError, setAddressesError] = useState(false);
+  const [addressesRetry, setAddressesRetry] = useState(0);
   const [selectedAddressId, setSelectedAddressId] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [pageReady, setPageReady] = useState(false);
@@ -88,24 +90,9 @@ const ShippingAddressPage: React.FC = () => {
   const [draftSaveError, setDraftSaveError] = useState(false);
   const pricingRequestRef = useRef(0);
   const hydratedDraftUserRef = useRef<string | null>(null);
-  const restoredDraftUserRef = useRef<string | null>(null);
+  const draftRef = useRef<ShippingFormData | null>(null);
 
   const [formData, setFormData] = useState<ShippingFormData>(createEmptyShippingFormData);
-
-  useEffect(() => {
-    if (!draftOwnerId || useExistingAddress) return;
-
-    try {
-      localStorage.setItem(
-        getShippingDraftKey(draftOwnerId),
-        JSON.stringify({ formData, updatedAt: Date.now() }),
-      );
-      setDraftSaveError(false);
-    } catch (err) {
-      console.error('Unable to save checkout address draft:', err);
-      setDraftSaveError(true);
-    }
-  }, [draftOwnerId, formData, useExistingAddress]);
 
   // Load saved addresses from Supabase or fallback to localStorage
   useEffect(() => {
@@ -205,6 +192,8 @@ const ShippingAddressPage: React.FC = () => {
   }, []);
 
   useEffect(() => {
+    if (authLoading) return;
+    let cancelled = false;
     const loadSavedAddresses = async () => {
       try {
         const userId = user?.id || currentAuthUser?.userId;
@@ -238,16 +227,17 @@ const ShippingAddressPage: React.FC = () => {
           }
 
           hydratedDraftUserRef.current = userId;
-          restoredDraftUserRef.current = restoredDraft ? userId : null;
+          draftRef.current = restoredDraft;
           setDraftOwnerId(userId);
           setFormData(restoredDraft || emptyForm);
           setSelectedAddressId(null);
-          setUseExistingAddress(false);
+          setUseExistingAddress(true);
         }
-        const hasRestoredDraft = restoredDraftUserRef.current === userId;
 
-        // Fetch from DB
         const result = await getUserAddresses(userId);
+        if (cancelled) return;
+        if (result.error) throw new Error(result.error);
+        setAddressesError(false);
         if (result.data && result.data.length > 0) {
           const addresses = result.data.map((a: any) => ({
             id: a.id,
@@ -266,12 +256,9 @@ const ShippingAddressPage: React.FC = () => {
           const supportedAddresses = IS_UK_STOREFRONT
             ? addresses.filter((address) => isUKCountry(address.country))
             : addresses;
-          setSavedAddresses(supportedAddresses);
+          setSavedAddresses(addresses);
 
-          // Auto-select default address if exists
-          const defaultAddress = hasRestoredDraft
-            ? undefined
-            : supportedAddresses.find(addr => addr.is_default);
+          const defaultAddress = supportedAddresses.find(addr => addr.is_default) || supportedAddresses[0];
           if (defaultAddress) {
             setSelectedAddressId(defaultAddress.id);
             setUseExistingAddress(true);
@@ -292,6 +279,9 @@ const ShippingAddressPage: React.FC = () => {
               delivery_notes: defaultAddress.delivery_notes || '',
             }));
           }
+        } else {
+          setSavedAddresses([]);
+          setSelectedAddressId(null);
         }
 
         // Pre-fill from auth context
@@ -307,14 +297,17 @@ const ShippingAddressPage: React.FC = () => {
           }));
         }
       } catch (err) {
+        if (cancelled) return;
         console.error('Failed to load addresses:', err);
+        setAddressesError(true);
       } finally {
-        setPageReady(true);
+        if (!cancelled) setPageReady(true);
       }
     };
 
-    loadSavedAddresses();
-  }, [user, currentAuthUser, navigate]);
+    void loadSavedAddresses();
+    return () => { cancelled = true; };
+  }, [user?.id, user?.full_name, user?.email, user?.phone, currentAuthUser?.userId, currentAuthUser?.email, authLoading, navigate, addressesRetry]);
 
   // Redirect if cart is empty
   useEffect(() => {
@@ -344,6 +337,7 @@ const ShippingAddressPage: React.FC = () => {
     const requestId = pricingRequestRef.current + 1;
     pricingRequestRef.current = requestId;
     setPricingLoading(true);
+    setPricing(null);
 
     const timer = window.setTimeout(() => {
       void (async () => {
@@ -375,6 +369,7 @@ const ShippingAddressPage: React.FC = () => {
 
     return () => {
       window.clearTimeout(timer);
+      if (pricingRequestRef.current === requestId) pricingRequestRef.current += 1;
     };
   }, [destinationCountryForPricing, formData.postal_code, pricingItems, rates, hasUnresolvedPublicPrices]);
 
@@ -414,12 +409,13 @@ const ShippingAddressPage: React.FC = () => {
         setDraftSaveError(true);
       }
     }
+    draftRef.current = next;
     setFormData(next);
   };
 
   const handleSelectAddress = (address: UserAddress) => {
-    if (draftOwnerId) removeShippingDraft(draftOwnerId);
     setDraftSaveError(false);
+    setError('');
     setUseExistingAddress(true);
     setSelectedAddressId(address.id);
     setAddressSelectionLoading(true);
@@ -443,6 +439,26 @@ const ShippingAddressPage: React.FC = () => {
       postal_code: address.postal_code || '',
       delivery_notes: address.delivery_notes || '',
     });
+  };
+
+  const handleNewAddress = () => {
+    setError('');
+    setFormData(draftRef.current || {
+      ...createEmptyShippingFormData(),
+      full_name: user?.full_name || '',
+      phone_number: user?.phone || '',
+      email: user?.email || currentAuthUser?.email || '',
+    });
+    setUseExistingAddress(false);
+  };
+
+  const handleBackToAddresses = () => {
+    setError('');
+    setUseExistingAddress(true);
+    const supported = savedAddresses.filter((address) => !IS_UK_STOREFRONT || isUKCountry(address.country));
+    const previous = supported.find((address) => address.id === selectedAddressId)
+      || supported.find((address) => address.is_default) || supported[0];
+    if (previous) handleSelectAddress(previous);
   };
 
   const validateForm = (): boolean => {
@@ -658,96 +674,81 @@ const ShippingAddressPage: React.FC = () => {
           <li className="ship-step"><span>3</span>Payment</li>
         </ol>
         <div className="bg-white border border-slate-200 rounded-2xl shadow-sm p-4 sm:p-6 mb-4">
-          <h2 className="text-lg sm:text-xl font-bold text-slate-900">Delivery address</h2>
-          <p className="text-xs sm:text-sm text-slate-500 mt-0.5 mb-4">Where should we send your order?</p>
+          <h1 className="text-xl sm:text-2xl font-bold text-slate-900 mb-4">
+            {useExistingAddress ? 'Choose delivery address' : 'Add a new address'}
+          </h1>
 
-          {/* Toggle between new address and saved addresses */}
-          {savedAddresses.length > 0 && (
-            <div className="ship-segment mb-4" role="tablist">
-              <button
-                onClick={() => setUseExistingAddress(false)}
-                role="tab"
-                aria-selected={!useExistingAddress}
-                className={`ship-segment-btn ${!useExistingAddress ? 'ship-segment-btn--on' : ''}`}
-              >
-                <Plus size={15} />
-                New Address
-              </button>
-              <button
-                onClick={() => {
-                  if (draftOwnerId) removeShippingDraft(draftOwnerId);
-                  setDraftSaveError(false);
-                  setUseExistingAddress(true);
-                }}
-                role="tab"
-                aria-selected={useExistingAddress}
-                className={`ship-segment-btn ${useExistingAddress ? 'ship-segment-btn--on' : ''}`}
-              >
-                <MapPin size={15} />
-                Saved ({savedAddresses.length})
+          {addressesError ? (
+            <div role="alert" className="rounded-xl border border-red-200 bg-red-50 p-4 text-sm text-red-700">
+              <p>We couldn&apos;t load your saved addresses. Please try again.</p>
+              <button type="button" className="mt-2 font-semibold underline" onClick={() => setAddressesRetry((count) => count + 1)}>
+                Retry
               </button>
             </div>
-          )}
-
-          {/* Saved Addresses Grid */}
-          {useExistingAddress && savedAddresses.length > 0 && (
-            <div className="mb-4 grid grid-cols-1 md:grid-cols-2 gap-3" role="radiogroup" aria-label="Saved addresses">
-              {savedAddresses.map((address) => (
-                <div
-                  key={address.id}
-                  role="radio"
-                  aria-checked={selectedAddressId === address.id}
-                  tabIndex={0}
-                  onClick={() => handleSelectAddress(address)}
-                  onKeyDown={(e) => {
-                    if (e.key === 'Enter' || e.key === ' ') {
-                      e.preventDefault();
-                      handleSelectAddress(address);
-                    }
-                  }}
-                  className={`relative p-3.5 rounded-xl border-2 cursor-pointer transition-all ${
-                    selectedAddressId === address.id
-                      ? 'border-[#6D28D9] bg-[#6D28D9]/5'
-                      : 'border-slate-200 hover:border-[#6D28D9]/50'
-                  }`}
-                >
-                  {address.is_default && (
-                    <span className="absolute top-3 right-3 bg-emerald-100 text-emerald-700 text-[11px] font-semibold px-2 py-0.5 rounded-full">
-                      Default
-                    </span>
-                  )}
-                  <div className="flex items-center gap-1.5 mb-1 pr-16">
-                    <span className="font-semibold text-sm text-slate-900 truncate">{address.full_name}</span>
-                    {selectedAddressId === address.id && (
-                      addressSelectionLoading ? <Loader2 size={14} className="text-[#6D28D9] animate-spin shrink-0" /> : <Check size={14} className="text-[#6D28D9] shrink-0" />
-                    )}
-                  </div>
-                  <div className="text-xs sm:text-[13px] text-slate-600 leading-relaxed">
-                    <p className="truncate">{address.phone_number}</p>
-                    <p>
-                      {address.street_address_1}
-                      {address.street_address_2 && `, ${address.street_address_2}`}
-                      , {address.city}, {address.state} {address.postal_code}, {address.country}
-                    </p>
-                  </div>
-                </div>
-              ))}
-            </div>
+          ) : useExistingAddress ? (
+            <>
+              {savedAddresses.length === 0 ? (
+                <p className="mb-4 text-sm text-slate-600">You have no saved addresses yet. Add one to continue.</p>
+              ) : (
+                <fieldset className="mb-4 space-y-3">
+                  <legend className="sr-only">Saved addresses</legend>
+                  {savedAddresses.map((address) => {
+                    const unsupported = IS_UK_STOREFRONT && !isUKCountry(address.country);
+                    return (
+                      <label key={address.id} className={`flex gap-3 rounded-xl border-2 p-4 ${
+                        selectedAddressId === address.id
+                          ? 'border-[#6D28D9] bg-[#6D28D9]/5'
+                          : 'border-slate-200 bg-white'
+                      } ${unsupported ? 'opacity-70' : 'cursor-pointer hover:border-[#6D28D9]/50'}`}>
+                        <input
+                          type="radio"
+                          name="saved-address"
+                          value={address.id}
+                          checked={selectedAddressId === address.id}
+                          disabled={unsupported}
+                          onChange={() => handleSelectAddress(address)}
+                          className="mt-1 h-5 w-5 shrink-0 accent-[#6D28D9]"
+                        />
+                        <span className="min-w-0 flex-1 text-sm text-slate-600 leading-relaxed">
+                          <span className="flex flex-wrap items-center gap-2 mb-1">
+                            <span className="font-bold text-slate-900">{address.full_name}</span>
+                            {address.is_default && <span className="rounded-full bg-[#6D28D9]/10 px-2 py-0.5 text-xs font-semibold text-[#6D28D9]">Default</span>}
+                            {selectedAddressId === address.id && addressSelectionLoading && <Loader2 size={14} className="animate-spin text-[#6D28D9]" aria-label="Updating shipping" />}
+                          </span>
+                          <span className="block">{address.street_address_1}{address.street_address_2 && `, ${address.street_address_2}`}</span>
+                          <span className="block">{[address.city, address.state, address.postal_code, address.country].filter(Boolean).join(', ')}</span>
+                          {address.phone_number && <span className="block">{address.phone_number}</span>}
+                          {unsupported && <span className="block mt-2 text-red-700">This UK storefront can only ship to a United Kingdom address.</span>}
+                        </span>
+                      </label>
+                    );
+                  })}
+                </fieldset>
+              )}
+              <button type="button" onClick={handleNewAddress} className="flex w-full items-center justify-center gap-2 rounded-xl border-2 border-[#6D28D9] px-4 py-3 font-semibold text-[#6D28D9] hover:bg-[#6D28D9]/5">
+                <Plus size={18} /> Add a new address
+              </button>
+            </>
+          ) : (
+            <button type="button" onClick={handleBackToAddresses} className="mb-4 text-sm font-semibold text-[#6D28D9] hover:underline">
+              ← Back to saved addresses
+            </button>
           )}
 
           {/* New Address Form */}
-          {(!useExistingAddress || savedAddresses.length === 0) && (
+          {!addressesError && !useExistingAddress && (
             <form onSubmit={handleSubmit} className="space-y-7">
               {/* Contact Information */}
               <div>
                 <h3 className="ship-section-title">Contact information</h3>
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                   <div>
-                    <label className="ship-label">
+                    <label htmlFor="shipping-full-name" className="ship-label">
                       Full Name <span className="text-red-500" aria-hidden>*</span>
                     </label>
                     <input
                       type="text"
+                      id="shipping-full-name"
                       name="full_name"
                       autoComplete="name"
                       value={formData.full_name}
@@ -758,11 +759,12 @@ const ShippingAddressPage: React.FC = () => {
                     />
                   </div>
                   <div>
-                    <label className="ship-label">
+                    <label htmlFor="shipping-phone" className="ship-label">
                       Phone Number <span className="text-red-500" aria-hidden>*</span>
                     </label>
                     <input
                       type="tel"
+                      id="shipping-phone"
                       name="phone_number"
                       autoComplete="tel" inputMode="tel"
                       value={formData.phone_number}
@@ -774,11 +776,12 @@ const ShippingAddressPage: React.FC = () => {
                   </div>
                 </div>
                 <div className="mt-4">
-                  <label className="ship-label">
+                  <label htmlFor="shipping-email" className="ship-label">
                     Email <span className="text-red-500" aria-hidden>*</span>
                   </label>
                   <input
                     type="email"
+                    id="shipping-email"
                     name="email"
                       autoComplete="email" inputMode="email"
                     value={formData.email}
@@ -815,11 +818,12 @@ const ShippingAddressPage: React.FC = () => {
 
                 <div className="space-y-4">
                   <div>
-                    <label className="ship-label">
+                    <label htmlFor="shipping-street" className="ship-label">
                       Street Address <span className="text-red-500" aria-hidden>*</span>
                     </label>
                     <input
                       type="text"
+                      id="shipping-street"
                       name="street_address_1"
                       autoComplete="address-line1"
                       value={formData.street_address_1}
@@ -830,11 +834,12 @@ const ShippingAddressPage: React.FC = () => {
                     />
                   </div>
                   <div>
-                    <label className="ship-label">
+                    <label htmlFor="shipping-street-2" className="ship-label">
                       Apartment, Suite, etc. (Optional)
                     </label>
                     <input
                       type="text"
+                      id="shipping-street-2"
                       name="street_address_2"
                       autoComplete="address-line2"
                       value={formData.street_address_2}
@@ -845,11 +850,12 @@ const ShippingAddressPage: React.FC = () => {
                   </div>
                   <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
                     <div className="col-span-2 md:col-span-1">
-                      <label className="ship-label">
+                      <label htmlFor="shipping-city" className="ship-label">
                         City <span className="text-red-500" aria-hidden>*</span>
                       </label>
                       <input
                         type="text"
+                        id="shipping-city"
                         name="city"
                       autoComplete="address-level2"
                         value={formData.city}
@@ -860,11 +866,12 @@ const ShippingAddressPage: React.FC = () => {
                       />
                     </div>
                     <div>
-                      <label className="ship-label">
+                      <label htmlFor="shipping-state" className="ship-label">
                         {IS_UK_STOREFRONT ? 'County' : 'State/Province'} <span className="text-red-500" aria-hidden>*</span>
                       </label>
                       <input
                         type="text"
+                        id="shipping-state"
                         name="state"
                       autoComplete="address-level1"
                         value={formData.state}
@@ -875,11 +882,12 @@ const ShippingAddressPage: React.FC = () => {
                       />
                     </div>
                     <div>
-                      <label className="ship-label">
+                      <label htmlFor="shipping-postal-code" className="ship-label">
                         Postal Code <span className="text-red-500" aria-hidden>*</span>
                       </label>
                       <input
                         type="text"
+                        id="shipping-postal-code"
                         name="postal_code"
                       autoComplete="postal-code"
                         value={formData.postal_code}
@@ -891,10 +899,11 @@ const ShippingAddressPage: React.FC = () => {
                     </div>
                   </div>
                   <div>
-                    <label className="ship-label">
+                    <label htmlFor="shipping-country" className="ship-label">
                       Country <span className="text-red-500" aria-hidden>*</span>
                     </label>
                     <select
+                      id="shipping-country"
                       name="country"
                       value={formData.country}
                       onChange={handleInputChange}
@@ -924,10 +933,11 @@ const ShippingAddressPage: React.FC = () => {
 
               {/* Delivery Notes */}
               <div>
-                <label className="ship-label">
+                <label htmlFor="shipping-notes" className="ship-label">
                   Delivery Notes (Optional)
                 </label>
                 <textarea
+                  id="shipping-notes"
                   name="delivery_notes"
                   value={formData.delivery_notes}
                   onChange={handleInputChange}
@@ -977,45 +987,6 @@ const ShippingAddressPage: React.FC = () => {
             </form>
           )}
 
-          {/* Guidance when no address selected */}
-          {useExistingAddress && !selectedAddressId && (
-            <p className="text-sm text-amber-700 bg-amber-50 border border-amber-200 rounded-xl px-4 py-3 text-center">
-              Please select an address above to continue
-            </p>
-          )}
-
-          {/* Continue with Selected Address */}
-          {useExistingAddress && selectedAddressId && (
-            <>
-              {error && (
-                <div className="mb-4 bg-red-50 border border-red-200 rounded-xl px-4 py-3 text-red-700">
-                  {error}
-                </div>
-              )}
-              {fxUnavailableForCheckout && (
-                <div className="mb-4 bg-amber-50 border border-amber-200 rounded-xl px-4 py-3 text-amber-700 text-sm">
-                  Live currency conversion is temporarily unavailable. Checkout is paused until rates are available.
-                </div>
-              )}
-              {pricingLoading && (
-                <div className="mb-4 bg-[#6D28D9]/5 border border-[#6D28D9]/20 rounded-xl px-4 py-3 text-[#5b21b6] text-sm">
-                  Checking configured shipping table, carrier fallback, and delivery estimate...
-                </div>
-              )}
-              {(publicPriceLoading || hasUnresolvedPublicPrices) && (
-                <div className="mb-4 bg-[#6D28D9]/5 border border-[#6D28D9]/20 rounded-xl px-4 py-3 text-[#5b21b6] text-sm">
-                  Loading final item prices...
-                </div>
-              )}
-              <button
-                onClick={handleSubmit}
-                disabled={isLoading || pricingLoading || publicPriceLoading || hasUnresolvedPublicPrices || fxUnavailableForCheckout}
-                className="ship-primary-btn"
-              >
-                {isLoading ? 'Saving...' : (pricingLoading || publicPriceLoading || hasUnresolvedPublicPrices) ? 'Refreshing Shipping...' : 'Continue to review order →'}
-              </button>
-            </>
-          )}
         </div>
         </div>{/* END LEFT COLUMN */}
 
@@ -1056,6 +1027,23 @@ const ShippingAddressPage: React.FC = () => {
             <div className="flex items-center justify-center gap-1.5 text-[11px] sm:text-[12px] text-emerald-700 mt-3">
               🔒 Secure checkout powered by Stripe
             </div>
+            {useExistingAddress && !addressesError && (
+              <div className="mt-4">
+                {!selectedAddressId && <p className="mb-3 text-sm text-slate-600">Select a supported address or add a new one to continue.</p>}
+                {error && <div role="alert" className="mb-3 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">{error}</div>}
+                {fxUnavailableForCheckout && <p className="mb-3 text-sm text-amber-700">Live currency conversion is temporarily unavailable. Checkout is paused until rates are available.</p>}
+                {pricingLoading && <p className="mb-3 text-sm text-slate-600" role="status">Checking shipping rates...</p>}
+                {(publicPriceLoading || hasUnresolvedPublicPrices) && <p className="mb-3 text-sm text-slate-600" role="status">Loading final item prices...</p>}
+                <button
+                  type="button"
+                  onClick={handleSubmit}
+                  disabled={!selectedAddressId || isLoading || pricingLoading || publicPriceLoading || hasUnresolvedPublicPrices || fxUnavailableForCheckout}
+                  className="ship-primary-btn"
+                >
+                  {isLoading ? 'Saving...' : (pricingLoading || publicPriceLoading || hasUnresolvedPublicPrices) ? 'Refreshing shipping...' : 'Continue to review'}
+                </button>
+              </div>
+            )}
           </div>
         </div>
         </div>{/* END GRID */}
