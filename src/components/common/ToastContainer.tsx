@@ -12,12 +12,13 @@ const config: Record<Toast['type'], { bg: string; border: string; text: string; 
 interface ToastContainerProps {
   toasts: Toast[];
   dismiss: (id: number) => void;
+  className?: string;
 }
 
-export const ToastContainer: React.FC<ToastContainerProps> = ({ toasts, dismiss }) => {
+export const ToastContainer: React.FC<ToastContainerProps> = ({ toasts, dismiss, className }) => {
   if (toasts.length === 0) return null;
   return (
-    <div className="fixed top-4 right-4 z-[200] flex flex-col gap-2 max-w-sm w-full pointer-events-none">
+    <div className={`${className ?? 'fixed top-4 right-4'} z-[200] flex flex-col gap-2 max-w-sm w-full pointer-events-none`}>
       {toasts.map(toast => {
         const c = config[toast.type];
         return (
@@ -28,7 +29,7 @@ export const ToastContainer: React.FC<ToastContainerProps> = ({ toasts, dismiss 
           >
             {c.icon}
             <span className="flex-1 break-words">{toast.message}</span>
-            <button onClick={() => dismiss(toast.id)} className="shrink-0 hover:opacity-70">
+            <button onClick={() => dismiss(toast.id)} aria-label="Dismiss notification" className="shrink-0 hover:opacity-70">
               <X className="w-3.5 h-3.5" />
             </button>
           </div>

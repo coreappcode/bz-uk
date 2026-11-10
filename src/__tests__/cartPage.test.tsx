@@ -60,6 +60,7 @@ describe('cart item cards', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     localStorage.clear();
+    items.splice(0, items.length, mocks.item);
     mocks.addToWishlistConfirmed.mockResolvedValue(undefined);
     mocks.removeFromCartConfirmed.mockResolvedValue(undefined);
     mocks.variantPrices.mockResolvedValue({
@@ -73,6 +74,10 @@ describe('cart item cards', () => {
     expect(screen.getByText('Size: M · Color: Blue')).toBeInTheDocument();
     expect(screen.getByText('In Stock')).toBeInTheDocument();
     expect(screen.getByRole('checkbox', { name: 'Select Test product' })).toBeChecked();
+    const productLink = screen.getByRole('link', { name: 'Test product' });
+    expect(productLink).toHaveAttribute('title', 'Test product');
+    expect(productLink.parentElement).toHaveClass('truncate');
+    expect(productLink.parentElement).not.toHaveClass('line-clamp-2');
 
     fireEvent.click(screen.getByRole('button', { name: 'Remove Test product from cart' }));
     expect(screen.getByText('Remove Item')).toBeInTheDocument();
@@ -98,7 +103,12 @@ describe('cart item cards', () => {
     expect(mocks.removeFromCartConfirmed).toHaveBeenCalledWith('item-1');
     expect(screen.getByText('Adding to Wishlist…')).toBeInTheDocument();
     await act(async () => { finishRemoval(); });
-    expect(screen.getByText('Product added to wishlist')).toBeInTheDocument();
+    const message = screen.getByText('Product added to wishlist');
+    const summary = screen.getByText(/Subtotal/).closest('.native-cart-checkout');
+    expect(summary).toContainElement(message);
+    expect(message.closest('[role="alert"]')?.parentElement).toHaveClass('bottom-full');
+    fireEvent.click(screen.getByRole('button', { name: 'Dismiss notification' }));
+    expect(screen.queryByText('Product added to wishlist')).not.toBeInTheDocument();
   });
 
   it('keeps the item in the cart and reports wishlist failure', async () => {
@@ -109,6 +119,18 @@ describe('cart item cards', () => {
     expect(await screen.findByText('Could not add product to your wishlist. Please try again.')).toBeInTheDocument();
     expect(mocks.removeFromCartConfirmed).not.toHaveBeenCalled();
     expect(screen.getByRole('button', { name: 'Add Test product to wishlist' })).toBeEnabled();
+  });
+
+  it('keeps the notification visible when the last item is moved to the wishlist', async () => {
+    const { rerender } = render(<MemoryRouter><CartPage /></MemoryRouter>);
+    await screen.findByText('INR 125');
+    fireEvent.click(screen.getByRole('button', { name: 'Add Test product to wishlist' }));
+    await screen.findByText('Product added to wishlist');
+    items.splice(0);
+    rerender(<MemoryRouter><CartPage /></MemoryRouter>);
+    expect(screen.getByText('Your Cart is Empty')).toBeInTheDocument();
+    const message = screen.getByText('Product added to wishlist');
+    expect(message.closest('[role="alert"]')?.parentElement).toHaveClass('fixed', 'bottom-4');
   });
 
   it('reports a partial failure if the wishlist succeeds but the cart removal fails', async () => {

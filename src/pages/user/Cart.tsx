@@ -322,7 +322,13 @@ export const CartPage: React.FC = () => {
       style={isNativePlatform ? { height: '100dvh', overflow: 'hidden' } : undefined}
     >
       <Header />
-      <ToastContainer toasts={toast.toasts} dismiss={toast.dismiss} />
+      {cartItems.length === 0 && (
+        <ToastContainer
+          toasts={toast.toasts}
+          dismiss={toast.dismiss}
+          className={`fixed ${isNativePlatform ? 'bottom-20' : 'bottom-4'} left-2 right-2 mx-auto`}
+        />
+      )}
 
       <main
         className="flex flex-1 min-h-0 w-full max-w-[1100px] mx-auto flex-col bg-white px-0 py-0 pb-0 md:block md:bg-transparent md:px-4 md:py-5 md:pb-5"
@@ -360,7 +366,7 @@ export const CartPage: React.FC = () => {
               <p className="hidden text-[12px] text-[#888] mb-3 md:block">{cartItems.length} item{cartItems.length !== 1 ? 's' : ''} in your cart</p>
 
               {/* Select All Row */}
-              <div className="flex items-center bg-white px-3 py-2.5 md:justify-between md:bg-transparent md:px-0 md:py-0 md:pb-3 md:border-b md:border-[#eee] md:mb-0">
+              <div className="flex items-center bg-white px-3 py-2 md:justify-between md:bg-transparent md:px-0 md:py-0 md:pb-3 md:border-b md:border-[#eee] md:mb-0">
                 <label className="flex items-center gap-2 text-[13px] font-semibold text-[#555] cursor-pointer md:font-normal">
                   <input
                     type="checkbox"
@@ -380,7 +386,7 @@ export const CartPage: React.FC = () => {
 
               {/* ─── Cart Items ─── */}
               <div
-                className="native-cart-scroll min-h-0 flex-1 overflow-y-auto overscroll-contain bg-slate-100 px-0 md:block md:overflow-visible md:bg-slate-50"
+                className="native-cart-scroll min-h-0 flex-1 overflow-y-auto overscroll-contain bg-white px-0 md:block md:overflow-visible"
                 style={isNativePlatform ? { display: 'block', overflow: 'visible' } : undefined}
               >
                 {cartItems.map((cartItem) => {
@@ -395,10 +401,10 @@ export const CartPage: React.FC = () => {
                 return (
                   <div
                     key={cartItem.cartItemId}
-                    className={`mb-2 bg-white border border-slate-200 last:mb-0 ${isUpdating ? 'opacity-60' : ''}`}
+                    className={`mb-1.5 bg-white border-y border-slate-200 last:mb-0 md:border ${isUpdating ? 'opacity-60' : ''}`}
                     aria-busy={isUpdating}
                   >
-                    <div className="flex gap-3 p-3 sm:p-4">
+                    <div className="flex gap-2 px-2.5 py-2 sm:p-4 sm:gap-3">
                       <input
                         type="checkbox"
                         checked={selectedItemIds.includes(cartItem.cartItemId)}
@@ -407,8 +413,8 @@ export const CartPage: React.FC = () => {
                         aria-label={`Select ${cartItem.product.name}`}
                         className="mt-1 w-[18px] h-[18px] accent-[#ff9900] cursor-pointer shrink-0"
                       />
-                      <div className="flex shrink-0 flex-col items-center gap-2">
-                        <div className="rounded border border-slate-200 bg-white overflow-hidden w-[72px] h-[72px] sm:w-[96px] sm:h-[96px]">
+                      <div className="flex shrink-0 flex-col items-center gap-1">
+                        <div className="rounded border border-slate-200 bg-white overflow-hidden w-[64px] h-[64px] sm:w-[96px] sm:h-[96px]">
                           <img
                             src={cartItem.product.image_url}
                             alt={cartItem.product.name}
@@ -421,11 +427,11 @@ export const CartPage: React.FC = () => {
                             onClick={() => handleUpdateQuantity(cartItem.cartItemId, cartItem.quantity - 1)}
                             disabled={isUpdating}
                             aria-label={`Decrease quantity of ${cartItem.product.name}`}
-                            className="w-7 h-8 bg-white text-slate-700 hover:bg-slate-50 disabled:opacity-50"
+                            className="w-6 h-7 bg-white text-slate-700 hover:bg-slate-50 disabled:opacity-50"
                           >
                             −
                           </button>
-                          <span className="min-w-7 h-8 flex items-center justify-center text-sm font-semibold border-x border-slate-200">
+                          <span className="min-w-6 h-7 flex items-center justify-center text-sm font-semibold border-x border-slate-200">
                             {cartItem.quantity}
                           </span>
                           <button
@@ -433,7 +439,7 @@ export const CartPage: React.FC = () => {
                             onClick={() => handleUpdateQuantity(cartItem.cartItemId, cartItem.quantity + 1)}
                             disabled={isUpdating || cartItem.quantity >= cartItem.product.stock}
                             aria-label={`Increase quantity of ${cartItem.product.name}`}
-                            className="w-7 h-8 bg-white text-slate-700 hover:bg-slate-50 disabled:opacity-50"
+                            className="w-6 h-7 bg-white text-slate-700 hover:bg-slate-50 disabled:opacity-50"
                           >
                             +
                           </button>
@@ -441,9 +447,10 @@ export const CartPage: React.FC = () => {
                         {isUpdating && <Loader2 className="w-4 h-4 text-[#ff9900] animate-spin" />}
                       </div>
                       <div className="flex-1 min-w-0">
-                      <div className="text-[14px] sm:text-[15px] font-semibold leading-snug line-clamp-2 mb-1">
+                      <div className="text-[14px] sm:text-[15px] font-semibold leading-snug truncate mb-0.5">
                         <Link
                           to={`/products/${cartItem.product.slug || cartItem.product.id}`}
+                          title={cartItem.product.name}
                           className="text-[#0f1111] hover:text-[#c45500] hover:underline transition-colors"
                         >
                           {cartItem.product.name}
@@ -459,12 +466,12 @@ export const CartPage: React.FC = () => {
                           {cartItem.selectedColor && `Color: ${cartItem.selectedColor}`}
                         </p>
                       )}
-                      <div className="mt-2 text-[16px] sm:text-[18px] font-bold text-[#b12704]">
+                      <div className="mt-1 text-[16px] sm:text-[18px] font-bold text-[#b12704]">
                         {typeof itemPrice === 'number'
                           ? formatPrice(itemPrice, resolvePublicPriceSourceCurrency(cartItem))
                           : 'Loading…'}
                       </div>
-                      <div className="flex flex-wrap gap-1.5 mt-2">
+                      <div className="flex flex-wrap gap-1.5 mt-1">
                         {cartItem.product.stock > 0 ? (
                           <span className="inline-block text-[11px] font-semibold px-2 py-0.5 rounded bg-[#d1fae5] text-[#047857]">In Stock</span>
                         ) : (
@@ -480,7 +487,7 @@ export const CartPage: React.FC = () => {
                         onClick={() => handleAddToWishlist(cartItem)}
                         disabled={isUpdating || wishlistMovingId !== null}
                         aria-label={isMovingToWishlist ? `Adding ${cartItem.product.name} to wishlist` : `Add ${cartItem.product.name} to wishlist`}
-                        className="flex min-h-11 items-center justify-center gap-2 px-2 text-xs sm:text-sm font-semibold text-slate-600 hover:bg-slate-50 hover:text-[#007185] disabled:opacity-50"
+                        className="flex min-h-10 items-center justify-center gap-2 px-2 text-xs sm:text-sm font-semibold text-slate-600 hover:bg-slate-50 hover:text-[#007185] disabled:opacity-50"
                       >
                         {isMovingToWishlist
                           ? <Loader2 className="h-4 w-4 shrink-0 animate-spin" aria-hidden="true" />
@@ -493,7 +500,7 @@ export const CartPage: React.FC = () => {
                         disabled={isUpdating}
                         data-no-global-confirm="true"
                         aria-label={`Remove ${cartItem.product.name} from cart`}
-                        className="flex min-h-11 items-center justify-center gap-2 px-2 text-xs sm:text-sm font-semibold text-slate-600 hover:bg-slate-50 hover:text-[#b12704] disabled:opacity-50"
+                        className="flex min-h-10 items-center justify-center gap-2 px-2 text-xs sm:text-sm font-semibold text-slate-600 hover:bg-slate-50 hover:text-[#b12704] disabled:opacity-50"
                       >
                         <Trash2 className="h-4 w-4 shrink-0" aria-hidden="true" />
                         Remove
@@ -509,7 +516,7 @@ export const CartPage: React.FC = () => {
                  CART SUMMARY (sticky above MobileNav on native)
                 ═══════════════════════════════════════════════ */}
             <div
-              className="native-cart-checkout shrink-0 px-2 pt-2 md:px-0 md:pt-0"
+              className="native-cart-checkout relative shrink-0 px-2 pt-2 md:px-0 md:pt-0"
               style={isNativePlatform ? {
                 position: 'sticky',
                 bottom: 0,
@@ -520,6 +527,11 @@ export const CartPage: React.FC = () => {
                 padding: '8px 16px 10px',
               } : undefined}
             >
+              <ToastContainer
+                toasts={toast.toasts}
+                dismiss={toast.dismiss}
+                className="absolute bottom-full left-2 right-2 mx-auto mb-2 md:fixed md:bottom-4 md:left-auto md:right-4 md:mb-0"
+              />
               {pricingLoading ? (
                 <div className="bg-white border border-[#ddd] rounded-[10px] p-6 sm:p-8 text-center">
                 <div className="flex items-center justify-center gap-3 mb-3">
@@ -529,7 +541,7 @@ export const CartPage: React.FC = () => {
                 <p className="text-[13px] text-[#888]">Please wait a moment</p>
                 </div>
               ) : (
-                <div className="bg-white border border-[#ddd] rounded-[10px] p-4 sm:p-5">
+                <div className="bg-white border border-[#ddd] rounded-[10px] p-3 sm:p-5">
                 <h2 className="hidden text-[18px] font-bold text-[#0f1111] mb-4 md:block">Cart Summary</h2>
 
                 {variantPriceError && (
@@ -544,7 +556,7 @@ export const CartPage: React.FC = () => {
                     {selectedCartItems.length > 0 ? formatPrice(displaySubtotal, currency) : '—'}
                   </span>
                 </div>
-                <hr className="border-t-2 border-[#ddd] my-3.5" />
+                <hr className="border-t-2 border-[#ddd] my-2.5 sm:my-3.5" />
 
                 <div className="flex justify-between text-[18px] font-bold text-[#b12704]">
                   <span>Estimated Total</span>
@@ -554,7 +566,7 @@ export const CartPage: React.FC = () => {
                 <button
                   onClick={handleCheckout}
                   disabled={!hasResolvedSelectedPrices || wishlistMovingId !== null}
-                  className="w-full mt-4 py-3.5 bg-[#ffd814] border border-[#fcd200] rounded-[10px] text-[15px] font-bold text-[#0f1111] cursor-pointer hover:bg-[#f7ca00] active:bg-[#e8b800] transition-colors"
+                  className="w-full mt-3 py-3 bg-[#ffd814] border border-[#fcd200] rounded-[10px] text-[15px] font-bold text-[#0f1111] cursor-pointer hover:bg-[#f7ca00] active:bg-[#e8b800] transition-colors"
                 >
                   Proceed to Checkout →
                 </button>
