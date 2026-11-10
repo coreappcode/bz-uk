@@ -256,7 +256,7 @@ const ShippingAddressPage: React.FC = () => {
           const supportedAddresses = IS_UK_STOREFRONT
             ? addresses.filter((address) => isUKCountry(address.country))
             : addresses;
-          setSavedAddresses(addresses);
+          setSavedAddresses(supportedAddresses);
 
           const defaultAddress = supportedAddresses.find(addr => addr.is_default) || supportedAddresses[0];
           if (defaultAddress) {
@@ -455,7 +455,7 @@ const ShippingAddressPage: React.FC = () => {
   const handleBackToAddresses = () => {
     setError('');
     setUseExistingAddress(true);
-    const supported = savedAddresses.filter((address) => !IS_UK_STOREFRONT || isUKCountry(address.country));
+    const supported = savedAddresses;
     const previous = supported.find((address) => address.id === selectedAddressId)
       || supported.find((address) => address.is_default) || supported[0];
     if (previous) handleSelectAddress(previous);
@@ -693,19 +693,17 @@ const ShippingAddressPage: React.FC = () => {
                 <fieldset className="mb-4 space-y-3">
                   <legend className="sr-only">Saved addresses</legend>
                   {savedAddresses.map((address) => {
-                    const unsupported = IS_UK_STOREFRONT && !isUKCountry(address.country);
                     return (
                       <label key={address.id} className={`flex gap-3 rounded-xl border-2 p-4 ${
                         selectedAddressId === address.id
                           ? 'border-[#6D28D9] bg-[#6D28D9]/5'
                           : 'border-slate-200 bg-white'
-                      } ${unsupported ? 'opacity-70' : 'cursor-pointer hover:border-[#6D28D9]/50'}`}>
+                      } cursor-pointer hover:border-[#6D28D9]/50`}>
                         <input
                           type="radio"
                           name="saved-address"
                           value={address.id}
                           checked={selectedAddressId === address.id}
-                          disabled={unsupported}
                           onChange={() => handleSelectAddress(address)}
                           className="mt-1 h-5 w-5 shrink-0 accent-[#6D28D9]"
                         />
@@ -718,7 +716,6 @@ const ShippingAddressPage: React.FC = () => {
                           <span className="block">{address.street_address_1}{address.street_address_2 && `, ${address.street_address_2}`}</span>
                           <span className="block">{[address.city, address.state, address.postal_code, address.country].filter(Boolean).join(', ')}</span>
                           {address.phone_number && <span className="block">{address.phone_number}</span>}
-                          {unsupported && <span className="block mt-2 text-red-700">This UK storefront can only ship to a United Kingdom address.</span>}
                         </span>
                       </label>
                     );
@@ -1029,7 +1026,7 @@ const ShippingAddressPage: React.FC = () => {
             </div>
             {useExistingAddress && !addressesError && (
               <div className="mt-4">
-                {!selectedAddressId && <p className="mb-3 text-sm text-slate-600">Select a supported address or add a new one to continue.</p>}
+                {!selectedAddressId && <p className="mb-3 text-sm text-slate-600">Select an address or add a new one to continue.</p>}
                 {error && <div role="alert" className="mb-3 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">{error}</div>}
                 {fxUnavailableForCheckout && <p className="mb-3 text-sm text-amber-700">Live currency conversion is temporarily unavailable. Checkout is paused until rates are available.</p>}
                 {pricingLoading && <p className="mb-3 text-sm text-slate-600" role="status">Checking shipping rates...</p>}

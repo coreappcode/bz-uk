@@ -75,13 +75,12 @@ describe('checkout shipping addresses', () => {
     mocks.pricing.mockResolvedValue({ subtotal: 10, total: 12, shipping: 2, currency: 'GBP', items: [] });
   });
 
-  it('shows saved addresses first, selects the default and preserves the UK restriction', async () => {
+  it('shows saved addresses first, selects the default and hides addresses outside the storefront country', async () => {
     renderPage();
     expect(await screen.findByText('12 High Street')).toBeInTheDocument();
-    expect(screen.getByText('Other Street')).toBeInTheDocument();
+    expect(screen.queryByText('Other Street')).not.toBeInTheDocument();
+    expect(screen.getAllByRole('radio')).toHaveLength(1);
     expect(screen.getByRole('radio', { name: /12 High Street/ })).toBeChecked();
-    expect(screen.getByRole('radio', { name: /Other Street/ })).toBeDisabled();
-    expect(screen.getByText(/only ship to a United Kingdom address/)).toBeInTheDocument();
     expect(screen.queryByRole('textbox', { name: /street address/i })).not.toBeInTheDocument();
     await waitFor(() => expect(screen.getByRole('button', { name: 'Continue to review' })).toBeEnabled());
     fireEvent.click(screen.getByRole('button', { name: 'Continue to review' }));
