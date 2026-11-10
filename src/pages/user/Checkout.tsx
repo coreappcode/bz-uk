@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
-import { AlertCircle, Loader2, ShieldCheck } from 'lucide-react';
+import { AlertCircle, ArrowLeft, ChevronDown, CreditCard, Headphones, Loader2, Lock, ShieldCheck, ShoppingCart, Zap } from 'lucide-react';
 import {
   Elements,
   PaymentElement,
@@ -589,6 +589,7 @@ const CheckoutForm: React.FC<
 
   // COD vs Stripe toggle
   const [payViaCod, setPayViaCod] = useState(false);
+  const [summaryOpen, setSummaryOpen] = useState(false);
 
   type CodLiveQuote = {
     totalAmount: number;
@@ -1417,9 +1418,58 @@ const CheckoutForm: React.FC<
   }
 
   // ------ Checkout form ------
-  return (
-    <div className="w-full max-w-2xl mx-auto space-y-4">
+  const itemCount = items.reduce((n, item) => n + (item.quantity || 1), 0);
+  const itemsSubtotal = Math.max(0, totalAmount - (shippingAmount || 0));
+  const previewItems = items.slice(0, 3);
 
+  const summaryCard = (
+    <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm lg:p-5">
+      <button
+        type="button"
+        onClick={() => setSummaryOpen((open) => !open)}
+        aria-expanded={summaryOpen}
+        className="flex w-full items-center justify-between text-left lg:pointer-events-none"
+      >
+        <span className="flex items-center gap-2 text-base font-bold text-slate-900">
+          <ShoppingCart size={20} className="text-slate-700" /> Order Summary
+        </span>
+        <ChevronDown size={20} className={`text-slate-600 transition-transform lg:hidden ${summaryOpen ? 'rotate-180' : ''}`} />
+      </button>
+      <div className={`${summaryOpen ? 'block' : 'hidden'} mt-3 lg:block`}>
+        <div className="space-y-1.5 text-sm text-slate-700">
+          <div className="flex justify-between"><span>Items ({itemCount})</span><span className="font-semibold text-slate-900">{fmtCurrency(itemsSubtotal, checkoutCurrency)}</span></div>
+          <div className="flex justify-between"><span>Shipping</span><span className="font-semibold text-slate-900">{fmtCurrency(shippingAmount || 0, checkoutCurrency)}</span></div>
+        </div>
+        <div className="mt-3 flex items-center justify-between border-t border-slate-200 pt-3">
+          <span className="font-bold text-slate-900">Total Payable</span>
+          <span className="text-xl font-extrabold text-[#6D28D9]">{fmtCurrency(totalAmount, checkoutCurrency)}</span>
+        </div>
+        <div className="mt-3 hidden items-center gap-2 lg:flex">
+          {previewItems.map((item, index) => (
+            <span key={item.cartItemId || `${item.productId}-${index}`} className="flex h-11 w-11 items-center justify-center overflow-hidden rounded-lg bg-slate-100">
+              {item.productImage ? <img src={item.productImage} alt={item.productName} className="h-full w-full object-cover" /> : null}
+            </span>
+          ))}
+          {items.length > previewItems.length && (
+            <span className="rounded-full bg-slate-100 px-3 py-1.5 text-xs font-medium text-slate-600">+{items.length - previewItems.length} more</span>
+          )}
+        </div>
+        <button type="button" onClick={() => confirmLeave('/checkout/review')} className="mt-3 text-xs font-semibold text-[#6D28D9] hover:underline">
+          View details
+        </button>
+      </div>
+    </div>
+  );
+
+  return (
+    <div className="grid w-full grid-cols-1 gap-4 lg:grid-cols-[1fr_340px] lg:items-start">
+      <ol className="ship-steps lg:col-span-2" aria-label="Checkout progress">
+        <li className="ship-step ship-step--done"><span>✓</span>Address</li>
+        <li className="ship-step ship-step--done"><span>✓</span>Review</li>
+        <li className="ship-step ship-step--active" aria-current="step"><span>3</span>Payment</li>
+      </ol>
+
+      <div className="order-2 space-y-4 lg:order-1">
       {/* Error — shown at the top so it's always visible */}
       {error && (
         <div className="bg-red-50 border border-red-200 rounded-lg px-4 py-3 flex items-start gap-2.5">
@@ -1427,22 +1477,6 @@ const CheckoutForm: React.FC<
           <p className="text-sm text-red-700">{error}</p>
         </div>
       )}
-
-      {/* Compact sticky order total bar — stacks directly below the global Header */}
-      <div
-        className="bg-white border border-[#ddd] rounded-lg p-4 flex items-center justify-between sticky z-[60] shadow-sm"
-        style={{ top: 'var(--bz-header-offset)' }}
-      >
-        <div className="text-sm text-gray-600">
-          <span>{items.length} item{items.length !== 1 ? 's' : ''}</span>
-          <span className="mx-1.5 text-gray-300">|</span>
-          <button type="button" onClick={() => confirmLeave('/checkout/review')} className="text-[#007185] hover:underline font-medium">View details</button>
-        </div>
-        <div className="text-right">
-          <span className="text-xs text-gray-500 block leading-tight">Total</span>
-          <span className="text-lg font-bold text-[#b12704]">{fmtCurrency(totalAmount, checkoutCurrency)}</span>
-        </div>
-      </div>
 
       {/* Billing Address */}
       <div className="bg-white border border-[#ddd] rounded-lg p-5">
@@ -1529,20 +1563,53 @@ const CheckoutForm: React.FC<
 
       {/* Payment — Stripe PaymentElement (auto-renders only available methods) */}
       {!payViaCod && (
-        <form onSubmit={handleSubmit} className="bg-white border border-[#ddd] rounded-lg p-5 space-y-4">
-          <h3 className="text-sm font-bold text-[#0f1111] uppercase tracking-wide">Payment Method</h3>
+        <form onSubmit={handleSubmit} className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm sm:p-6 space-y-5">
+          <div className="flex items-center justify-between gap-3">
+            <div className="flex items-center gap-3">
+              <span className="flex h-11 w-11 items-center justify-center rounded-full bg-[#6D28D9] text-white"><CreditCard size={20} /></span>
+              <div>
+                <h3 className="text-base font-bold text-slate-900">Payment Method</h3>
+                <p className="text-xs text-slate-500">Pay securely with your debit or credit card</p>
+              </div>
+            </div>
+            <div className="flex items-center gap-2" aria-hidden="true">
+              <span className="text-sm font-extrabold italic text-[#1a1f71]">VISA</span>
+              <span className="relative inline-block h-5 w-8"><span className="absolute left-0 h-5 w-5 rounded-full bg-[#eb001b]" /><span className="absolute right-0 h-5 w-5 rounded-full bg-[#f79e1b]/90" /></span>
+              <span className="rounded bg-[#2e77bc] px-1 py-0.5 text-[8px] font-bold leading-tight text-white">AMEX</span>
+            </div>
+          </div>
+
           <PaymentElement options={paymentElementOptions} />
-          <button
-            type="submit"
-            disabled={!stripe || !elements || isLoading}
-            className="w-full py-3.5 bg-[#ffd814] hover:bg-[#f7ca00] border border-[#fcd200] disabled:bg-gray-200 disabled:border-gray-300 disabled:cursor-not-allowed text-[#0f1111] rounded-lg text-[15px] font-bold cursor-pointer transition-colors flex items-center justify-center gap-2"
-          >
-            {isLoading ? (
-              <><Loader2 size={16} className="animate-spin" /> Processing...</>
-            ) : (
-              `PAY NOW — ${fmtCurrency(totalAmount, checkoutCurrency)}`
-            )}
-          </button>
+
+          <div className="flex items-center gap-3 rounded-xl bg-[#6D28D9]/5 px-4 py-3">
+            <ShieldCheck size={26} className="shrink-0 text-[#6D28D9]" />
+            <div className="min-w-0 flex-1">
+              <p className="text-sm font-bold text-slate-900">Your payment is secure</p>
+              <p className="text-xs text-slate-600">We use industry-standard encryption to protect your card details.</p>
+            </div>
+            <Lock size={26} className="shrink-0 text-slate-300" />
+          </div>
+
+          <div className="flex flex-col gap-3 border-t border-slate-100 pt-4 sm:flex-row sm:items-center sm:justify-between">
+            <button
+              type="submit"
+              disabled={!stripe || !elements || isLoading}
+              className="order-1 flex w-full items-center justify-center gap-2 rounded-xl bg-[#6D28D9] py-3.5 text-[15px] font-bold text-white transition-colors hover:bg-[#5b21b6] disabled:cursor-not-allowed disabled:bg-slate-200 disabled:text-slate-500 sm:order-2 sm:w-[60%]"
+            >
+              {isLoading ? (
+                <><Loader2 size={16} className="animate-spin" /> Processing...</>
+              ) : (
+                <><Lock size={18} /> {`Pay Now — ${fmtCurrency(totalAmount, checkoutCurrency)}`}</>
+              )}
+            </button>
+            <button
+              type="button"
+              onClick={() => confirmLeave('/checkout/review')}
+              className="order-2 flex items-center justify-center gap-2 text-sm font-medium text-slate-700 hover:text-[#6D28D9] sm:order-1"
+            >
+              <ArrowLeft size={16} /> Back to Review
+            </button>
+          </div>
         </form>
       )}
 
@@ -1578,20 +1645,34 @@ const CheckoutForm: React.FC<
         </div>
       )}
 
-      {/* Back + security */}
-      <div className="flex items-center justify-between">
-        <button
-          type="button"
-          onClick={() => confirmLeave('/checkout/review')}
-          className="text-sm text-[#007185] hover:underline font-medium"
-        >
-          ← Back to Review
-        </button>
-        <div className="flex items-center gap-1.5">
-          <ShieldCheck size={14} className="text-[#555]" />
-          <span className="text-[11px] text-[#555] font-medium">256-bit SSL · Powered by Stripe</span>
+      {/* Back + security (COD only; the card form has its own footer) */}
+      {payViaCod && (
+        <div className="flex items-center justify-between">
+          <button
+            type="button"
+            onClick={() => confirmLeave('/checkout/review')}
+            className="flex items-center gap-2 text-sm font-medium text-slate-700 hover:text-[#6D28D9]"
+          >
+            <ArrowLeft size={16} /> Back to Review
+          </button>
+          <div className="flex items-center gap-1.5">
+            <ShieldCheck size={14} className="text-[#555]" />
+            <span className="text-[11px] text-[#555] font-medium">Secure checkout</span>
+          </div>
         </div>
+      )}
       </div>
+
+      <aside className="order-1 space-y-4 lg:order-2 lg:sticky" style={{ top: 'var(--bz-header-offset)' }}>
+        {summaryCard}
+        <div className="hidden rounded-2xl border border-slate-200 bg-white p-4 shadow-sm lg:block">
+          <ul className="divide-y divide-slate-100 text-sm text-slate-800">
+            <li className="flex items-center gap-3 py-2.5"><ShieldCheck size={20} className="text-[#6D28D9]" /> Secure Payment</li>
+            <li className="flex items-center gap-3 py-2.5"><Zap size={20} className="text-[#6D28D9]" /> Instant Confirmation</li>
+            <li className="flex items-center gap-3 py-2.5"><Headphones size={20} className="text-[#6D28D9]" /> Customer Support</li>
+          </ul>
+        </div>
+      </aside>
 
       {/* Leave-page confirmation dialog */}
       {leaveDialog && (
@@ -2419,8 +2500,8 @@ const Checkout: React.FC = () => {
               appearance: {
                 theme: 'stripe',
                 variables: {
-                  colorPrimary: '#2563eb',
-                  borderRadius: '8px',
+                  colorPrimary: '#6D28D9',
+                  borderRadius: '12px',
                 },
               },
             }}
