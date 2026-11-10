@@ -13,7 +13,6 @@ const mocks = vi.hoisted(() => ({
 vi.mock('react-router-dom', () => ({
   useParams: () => ({ categoryId: mocks.categoryId }),
   useNavigate: () => vi.fn(),
-  Link: ({ children }: { children: React.ReactNode }) => <span>{children}</span>,
 }));
 vi.mock('../components/layout/StorefrontHeader', () => ({ StorefrontHeader: () => null }));
 vi.mock('../components/layout/Footer', () => ({ Footer: () => null }));
@@ -70,6 +69,9 @@ describe('category product pagination', () => {
   it('fetches 25 at a time on scroll and stops after the last page', async () => {
     render(<CategoryProducts />);
     expect(await screen.findAllByTestId('product')).toHaveLength(25);
+    expect(screen.getByRole('heading', { level: 1, name: 'category-a' })).toHaveClass('sr-only');
+    expect(screen.queryByText(/Showing \d+ results?/)).not.toBeInTheDocument();
+    expect(screen.queryByRole('navigation')).not.toBeInTheDocument();
     expect(mocks.fetchProducts).toHaveBeenCalledTimes(1);
     expect(mocks.fetchProducts).toHaveBeenLastCalledWith(expect.objectContaining({ limit: 25, offset: 0, stableOrder: true }));
 

@@ -264,8 +264,8 @@ product price, rating, stock and category fields as before. Price range bounds
 come from a separate highest-price query that runs alongside the first product
 request. Ordering includes a unique ID tie-breaker, although offset pagination
 can still shift if products are inserted or removed between requests. The page
-shows the number of loaded results rather than an exact total; the brand list
-and section counts likewise describe loaded products. Featured products retain
+does not display an overall result count; the brand list and section counts
+describe loaded products. Featured products retain
 subcategory grouping; other sort choices use a single list so their ordering is
 visible across the whole category. Failed category/product queries show an
 error, and obsolete responses from previous categories or filters are ignored.

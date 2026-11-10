@@ -1,11 +1,11 @@
 import React, { useState, useMemo, useEffect, useCallback, useRef } from 'react';
-import { useParams, useNavigate, Link } from 'react-router-dom';
+import { useParams, useNavigate } from 'react-router-dom';
 import { StorefrontHeader } from '../components/layout/StorefrontHeader';
 import { Footer } from '../components/layout/Footer';
 import { MobileNav } from '../components/layout/MobileNav';
 import { ProductCard } from '../components/products/ProductCard';
 import {
-  ChevronRight, SlidersHorizontal, X, Star,
+  SlidersHorizontal, X, Star,
   Grid3X3, LayoutList, ChevronDown, AlertCircle
 } from 'lucide-react';
 import { ProductGridSkeleton } from '../components/common/Skeleton';
@@ -41,7 +41,6 @@ export const CategoryProducts: React.FC = () => {
 
   const [loading, setLoading] = useState(true);
   const [category, setCategory] = useState<CategoryInfo | null>(null);
-  const [parentCategory, setParentCategory] = useState<CategoryInfo | null>(null);
   const [subcategories, setSubcategories] = useState<CategoryInfo[]>([]);
   const [parentById, setParentById] = useState<Record<string, string | null>>({});
   const [products, setProducts] = useState<any[]>([]);
@@ -97,7 +96,6 @@ export const CategoryProducts: React.FC = () => {
 
         if (ctx.category) {
           setCategory(ctx.category);
-          setParentCategory(ctx.parent);
           setSubcategories(ctx.children);
           setParentById(ctx.parentById || {});
           setDynamicPriceMax(100000);
@@ -404,37 +402,7 @@ export const CategoryProducts: React.FC = () => {
     <div className="min-h-screen bg-gray-50 pb-16 md:pb-0 overflow-x-hidden">
       <StorefrontHeader />
 
-      {/* ── Breadcrumb ── */}
-      <div className="bg-white border-b border-gray-200">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-2.5">
-          <nav className="flex items-center gap-1.5 text-xs text-gray-500 overflow-x-auto no-scrollbar whitespace-nowrap">
-            <Link to="/" className="hover:text-amber-600 transition">Home</Link>
-            {parentCategory && (
-              <>
-                <ChevronRight size={12} className="shrink-0 text-gray-400" />
-                <Link
-                  to={`/category/${parentCategory.slug}`}
-                  className="hover:text-amber-600 transition"
-                >
-                  {parentCategory.name}
-                </Link>
-              </>
-            )}
-            <ChevronRight size={12} className="shrink-0 text-gray-400" />
-            <span className="text-gray-900 font-medium">{category.name}</span>
-          </nav>
-        </div>
-      </div>
-
-      {/* ── Category Header ── */}
-      <div className="bg-white border-b border-gray-200">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4">
-          <h1 className="text-xl md:text-2xl font-bold text-gray-900">{category.name}</h1>
-          <p className="text-sm text-gray-500 mt-0.5">
-            Showing {filteredProducts.length} result{filteredProducts.length !== 1 ? 's' : ''}{hasMore ? ' (more available)' : ''}
-          </p>
-        </div>
-      </div>
+      <h1 className="sr-only">{category.name}</h1>
 
       {/* ── Subcategory Navigation (Amazon-style chips) ── */}
       {subcategories.length > 0 && (
