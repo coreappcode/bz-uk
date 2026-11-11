@@ -16,7 +16,9 @@ and behavior. Do not change the working web checkout or other apps.
       cards and authentication.
 - [x] Save the order recovery snapshot before payment, as the web app does.
 - [ ] Confirm payment and create or recover the paid order idempotently; clear
-      purchased cart items only after the paid order is confirmed.
+      purchased cart items only after the paid order is confirmed. The existing
+      order RPC creates a pending payment, so recovery still depends on the
+      Stripe webhook to mark the order paid.
 - [ ] Handle interrupted payments, app restarts, pending confirmations, and
       retries without asking the customer to pay twice.
 - [ ] Remove UK checkout guards only when the complete flow is ready; deploy

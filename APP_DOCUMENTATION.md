@@ -181,7 +181,9 @@ retry. It has not been deployed and does not validate the checkout quote. Its
 comparison with the app's prepared amount is a consistency check, not an
 authoritative quote. The app persists a pending payment reference locally and
 uses the saved server snapshot to retry order creation after verified payment;
-this recovery flow still requires end-to-end verification.
+the order RPC leaves payment pending, so the existing Stripe webhook is still
+needed to mark the order paid. This recovery flow still requires end-to-end
+verification.
 The experimental UK quote uses the standard international Shippo tier and
 calculates available delivery tiers using the web's standard-rate delta approach.
 Multi-shipment tier selection and fulfillment details still need parity
