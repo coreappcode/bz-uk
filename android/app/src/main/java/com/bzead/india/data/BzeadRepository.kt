@@ -1168,6 +1168,7 @@ object BzeadRepository {
 
     /** Web Checkout mount: refresh the live quote, enforce the minimum order, then create the Razorpay order. */
     suspend fun prepareRazorpayPayment(): PreparedPayment {
+        MarketCheckoutGuard.requireRazorpayAvailable(com.bzead.india.BuildConfig.APPLICATION_ID)
         val token = checkoutToken()
         val uid = session?.userId ?: throw CheckoutException("Authentication expired. Please log in again.")
         val address = activeAddress() ?: throw CheckoutException("Please add a delivery address before placing the order.")
@@ -1203,6 +1204,12 @@ object BzeadRepository {
 
     /** Web `handleRazorpaySubmit`. Progress and the outcome are published through [checkoutState]. */
     fun startRazorpayPayment(activity: android.app.Activity, prepared: PreparedPayment, billing: BillingAddress) {
+        try {
+            MarketCheckoutGuard.requireRazorpayAvailable(com.bzead.india.BuildConfig.APPLICATION_ID)
+        } catch (e: CheckoutException) {
+            _checkoutState.value = CheckoutState.Failure(e.message ?: "UK checkout is not available yet.")
+            return
+        }
         if (_checkoutState.value is CheckoutState.Processing) return
         _checkoutState.value = CheckoutState.Processing
         authScope.launch { runRazorpayPayment(activity, prepared, billing) }

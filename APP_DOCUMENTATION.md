@@ -130,6 +130,17 @@ configuration is not a substitute for backend authorization.
 
 ## 4. Market and pricing behavior
 
+### Native Android UK app status
+
+The imported native Android project is in `android/`. Its UK application ID
+is `com.bzead.uk`, and its Firebase configuration includes that application.
+The existing Android backend client points to the shared Supabase project.
+The project is not yet a UK-ready storefront: its catalog pricing and currency
+display, saved addresses, shipping quotes, and order flow still implement the
+India market. Its Razorpay checkout is blocked for the UK application until a
+UK pricing and native Stripe payment flow is implemented and verified. Do not
+release it as a working UK shopping app based on its application ID alone.
+
 ### Market selection
 
 `src/config/market.ts` defines the UK country name/code and GBP currency.

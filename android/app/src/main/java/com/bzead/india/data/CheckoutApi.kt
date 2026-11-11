@@ -809,6 +809,7 @@ internal object CheckoutApi {
     // ---------- Razorpay + order recovery ----------
 
     suspend fun createRazorpayOrder(token: String, amountPaise: Long, customerId: String, itemCount: Int): RazorpayOrder {
+        MarketCheckoutGuard.requireRazorpayAvailable(com.bzead.india.BuildConfig.APPLICATION_ID)
         val body = JSONObject()
             .put("amount", amountPaise)
             .put("currency", "INR")
