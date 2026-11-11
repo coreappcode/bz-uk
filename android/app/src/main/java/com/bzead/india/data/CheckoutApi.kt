@@ -336,6 +336,132 @@ internal object CheckoutApi {
         val fallbackShippingTotal: Double
     )
 
+    internal suspend fun calculateUkQuote(
+        items: List<CheckoutItem>,
+        destinationPostalCode: String,
+        token: String
+    ): CheckoutQuote {
+        if (items.isEmpty()) throw CheckoutException("Your cart is empty.")
+        if (items.any { it.productId.isBlank() || it.quantity <= 0 }) throw CheckoutException("Invalid cart item.")
+        val postcode = sanitizePostal(destinationPostalCode)
+        if (postcode.isBlank()) throw CheckoutException("Please enter a UK postal code.")
+
+        fun checked(result: RestResult, label: String): List<JSONObject> {
+            if (!result.ok) throw CheckoutException("Unable to load $label: ${result.error}")
+            return rows(result)
+        }
+
+        val productIds = items.map { it.productId }.distinct()
+        val variants = verifyVariantPrices(items, "United Kingdom", token)
+        val productRows = checked(get(
+            "products?select=id,origin_country,origin_country_id,currency,package_weight,package_weight_unit_id," +
+                "package_length,package_length_unit_id,package_width,package_width_unit_id,package_height,package_height_unit_id,seller_id" +
+                "&id=${ids(productIds)}&approval_status=eq.approved&is_active=eq.true", token
+        ), "products").associateBy { str(it, "id") }
+        val countries = checked(get("countries?select=id,country_name,country_code,short_code,iso2&is_active=eq.true", token), "countries")
+        val units = checked(get("measurement_units?select=id,code&is_active=eq.true", token), "measurement units")
+            .associate { str(it, "id") to str(it, "code").uppercase() }
+        val providerRows = checked(get(
+            "shipping_provider_config?select=country_code,provider,domestic,international&active=eq.true", token
+        ), "shipping providers")
+        val rules = checked(SupabaseRest.request("POST", "rpc/get_active_checkout_min_order_rules", token, "{}"), "minimum-order rules")
+        val offers = checked(get(
+            "offer_rules?select=product_id,offer_type,buy_quantity,get_quantity,discount_percent,start_time,end_time,bundle_min_qty,bundle_discount" +
+                "&product_id=${ids(productIds)}&is_active=eq.true", token
+        ), "offers").groupBy { str(it, "product_id") }
+        val uk = countries.firstOrNull {
+            listOf(str(it, "country_name"), str(it, "country_code"), str(it, "short_code"), str(it, "iso2"))
+                .any { value -> StorefrontMarket.supportsCountry(value, uk = true) }
+        } ?: throw CheckoutException("UK shipping destination is unavailable.")
+        val ukId = str(uk, "id").takeIf { it.isNotBlank() }
+            ?: throw CheckoutException("UK shipping destination is unavailable.")
+        val sellers = productRows.values.map { str(it, "seller_id") }.filter { it.isNotBlank() }.distinct()
+        if (sellers.isEmpty()) throw CheckoutException("Seller information is unavailable.")
+        val profiles = checked(get("profiles?select=id,country_id&id=${ids(sellers)}", token), "seller countries")
+            .associate { str(it, "id") to str(it, "country_id") }
+        val postcodes = checked(get("seller_kyc?select=seller_id,business_postal_code&seller_id=${ids(sellers)}", token), "seller postcodes")
+            .associate { str(it, "seller_id") to sanitizePostal(str(it, "business_postal_code")) }
+        val countryById = countries.associateBy { str(it, "id") }
+        val nonVariantIds = items.indices.filter { !variants.containsKey(it) }.map { items[it].productId }.distinct()
+        val productPrices = mutableMapOf<String, Double>()
+        if (nonVariantIds.isNotEmpty()) {
+            val pricesBody = JSONObject().put("p_product_ids", JSONArray(nonVariantIds)).put("p_country", "United Kingdom")
+            checked(SupabaseRest.request("POST", "rpc/get_public_product_prices", token, pricesBody.toString()), "product prices")
+                .forEach { productPrices[str(it, "product_id")] = finiteNum(it, "selling_price") }
+            checked(get(
+                "product_country_selling_prices?select=product_id,selling_price&product_id=${ids(nonVariantIds)}&country_id=eq.${SupabaseRest.enc(ukId)}", token
+            ), "country prices").forEach { row ->
+                val value = str(row, "selling_price").toDoubleOrNull()
+                if (value != null && value.isFinite() && value >= 0) productPrices[str(row, "product_id")] = value
+            }
+        }
+        val rates = MarketCurrency.loadRates(token)
+        val now = System.currentTimeMillis()
+        val variantIds = mutableListOf<String?>()
+        val variantSkus = mutableListOf<String?>()
+        val lines = items.mapIndexed { index, item ->
+            val product = productRows[item.productId]
+                ?: throw CheckoutException("\"${item.productName}\" is no longer available.")
+            val seller = str(product, "seller_id")
+            val originId = str(product, "origin_country_id").ifBlank { profiles[seller].orEmpty() }
+            val country = countryById[originId] ?: throw CheckoutException("Product origin is unavailable.")
+            val originIso = str(country, "iso2").ifBlank { str(country, "country_code") }.uppercase()
+            val currency = str(product, "currency").trim().uppercase()
+            val variant = variants[index]
+            val price = variant?.second ?: productPrices[item.productId]
+                ?: throw CheckoutException("Unable to verify the price of \"${item.productName}\".")
+            if (!price.isFinite() || price <= 0) throw CheckoutException("Invalid product price.")
+            variantIds.add(variant?.first?.id)
+            variantSkus.add(variant?.first?.sku)
+            fun unit(column: String, default: String) = units[str(product, column)].takeUnless { it.isNullOrBlank() } ?: default
+            val parcel = UkParcel(
+                item.quantity,
+                weightToKg(finiteNum(product, "package_weight"), unit("package_weight_unit_id", "KG")),
+                dimToCm(finiteNum(product, "package_length"), unit("package_length_unit_id", "CM")),
+                dimToCm(finiteNum(product, "package_width"), unit("package_width_unit_id", "CM")),
+                dimToCm(finiteNum(product, "package_height"), unit("package_height_unit_id", "CM"))
+            )
+            val activeOffers = offers[item.productId].orEmpty().filter {
+                val start = parseTimestamp(str(it, "start_time"))
+                val end = parseTimestamp(str(it, "end_time"))
+                (start == null || now >= start) && (end == null || now <= end)
+            }.map {
+                val type = str(it, "offer_type")
+                UkCheckoutOffer(
+                    type = type,
+                    percent = finiteNum(it, if (type.equals("bundle_discount", true)) "bundle_discount" else "discount_percent"),
+                    minimumQuantity = floor(finiteNum(it, "bundle_min_qty")).toInt(),
+                    buyQuantity = floor(finiteNum(it, "buy_quantity")).toInt(),
+                    freeQuantity = floor(finiteNum(it, "get_quantity")).toInt()
+                )
+            }
+            UkCheckoutLine(seller, originId, originIso, postcodes[seller].orEmpty(), item.quantity, price, currency, parcel, activeOffers)
+        }
+        val amounts = UkCheckoutCalculator.calculate(lines, rates) { group ->
+            val first = group.first()
+            val domestic = first.originId == ukId
+            val shippo = providerRows.any {
+                str(it, "country_code").equals(first.originIso, true) &&
+                    str(it, "provider").equals("shippo", true) &&
+                    it.optBoolean(if (domestic) "domestic" else "international")
+            }
+            UkShippingApi.quote(first.originId, first.originIso, ukId, first.pickupPostcode, postcode, shippo, group.map { it.parcel }, token)
+        }
+        val minimum = rules.firstNotNullOfOrNull { rule ->
+            val origin = norm(str(rule, "origin_iso2"))
+            val destination = norm(str(rule, "destination_iso2"))
+            val minInr = finiteNum(rule, "min_order_inr")
+            val subtotal = amounts.inrSubtotalByOrigin[origin] ?: 0.0
+            if (destination == "GB" && minInr > 0 && subtotal > 0) {
+                MinimumOrderConstraint(r2(minInr), r2(subtotal), r2(subtotal) >= minInr)
+            } else null
+        }
+        return CheckoutQuote(
+            amounts.subtotal, amounts.discount, amounts.shipping, amounts.total,
+            amounts.shipping, 0.0, amounts.unitPrices, variantIds, variantSkus, minimum
+        )
+    }
+
     /**
      * Web `calculateDestinationCheckoutPricing` for an India destination, prepaid (isCod = false).
      * Lines whose origin is not India need the international/Shippo path, which this app does not have.

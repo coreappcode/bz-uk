@@ -170,7 +170,10 @@ release it as a working UK shopping app based on its application ID alone.
 
 The Android project includes a UK shipping rate-card/carrier adapter and Stripe
 PaymentSheet scaffolding, but neither is connected to a complete UK checkout
-quote. The separate `create-android-payment-intent` function has not been
+quote. An experimental UK quote calculation loads product and shipping data and
+calculates GBP totals, but is not connected to checkout and does not yet
+implement all website shipping options and recovery requirements. The separate
+`create-android-payment-intent` function has not been
 deployed; its client-supplied amount must be replaced with a server-verified UK
 quote before enabling payments. Validate shipping, customer-session card saving,
 3-D Secure, webhook recovery, and charge/order amounts in Stripe test mode
