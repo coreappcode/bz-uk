@@ -67,28 +67,34 @@ internal object UkShippingApi {
         }?.value
     }
 
-    fun parseProviderRate(body: JSONObject, shippo: Boolean, originIso: String): UkShippingRate {
+    fun parseProviderRate(
+        body: JSONObject,
+        shippo: Boolean,
+        originIso: String,
+        domestic: Boolean = true
+    ): UkShippingRate {
         val tier = if (shippo) {
-            body.optJSONObject("cheapest")?.takeIf { it.has("rate") && !it.isNull("rate") }
-                ?: body.optJSONObject("tiers")?.optJSONObject("standard")
+            val standard = body.optJSONObject("tiers")?.optJSONObject("standard")
+            if (domestic) {
+                body.optJSONObject("cheapest")?.takeIf { it.has("rate") && !it.isNull("rate") } ?: standard
+            } else standard
         } else {
             val tiers = body.optJSONArray("tiers")
             (0 until (tiers?.length() ?: 0)).mapNotNull { tiers?.optJSONObject(it) }
                 .firstOrNull { it.optString("tier") == "standard" }
         } ?: throw CheckoutException("No shipping is available for this route.")
         val amount = tier.optDouble("rate", Double.NaN)
-        val currency = if (shippo) {
+        val originCurrency = when (originIso.uppercase()) {
+            "US" -> "USD"
+            "CA" -> "CAD"
+            "GB" -> "GBP"
+            else -> "EUR"
+        }
+        val currency = if (shippo && domestic) {
             tier.optString("currency").trim().uppercase().ifEmpty {
                 body.optJSONObject("tiers")?.optJSONObject("standard")?.optString("currency").orEmpty().trim().uppercase()
-            }.ifEmpty {
-                when (originIso.uppercase()) {
-                    "US" -> "USD"
-                    "CA" -> "CAD"
-                    "GB" -> "GBP"
-                    else -> "EUR"
-                }
-            }
-        } else "INR"
+            }.ifEmpty { originCurrency }
+        } else if (shippo) originCurrency else "INR"
         if (!amount.isFinite() || amount < 0) {
             throw CheckoutException("The shipping provider returned an invalid rate.")
         }
@@ -156,6 +162,6 @@ internal object UkShippingApi {
         val result = SupabaseRest.callFunction(if (shippo) "shippo-rate" else "shiprocket-rate", token, request)
         if (!result.ok) throw CheckoutException("Unable to obtain a shipping rate. Please try again.")
         val body = result.json() ?: throw CheckoutException("The shipping provider returned an invalid response.")
-        return parseProviderRate(body, shippo, originIso)
+        return parseProviderRate(body, shippo, originIso, domestic = originId == destinationId)
     }
 }

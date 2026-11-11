@@ -182,6 +182,9 @@ The separate Android Stripe status verification function checks the authenticate
 buyer and the Stripe payment status; it has not been deployed and does not
 validate the checkout quote or replace order recovery. Its comparison with the
 app's prepared amount is a consistency check, not an authoritative quote.
+The experimental UK quote uses the standard international Shippo tier and
+preserves carrier metadata for a single shipment. Multiple shipments still need
+complete tier selection and fulfillment metadata before checkout can be enabled.
 
 ### Market selection
 

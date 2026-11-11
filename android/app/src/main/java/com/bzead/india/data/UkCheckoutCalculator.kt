@@ -30,7 +30,8 @@ internal data class UkCheckoutAmounts(
     val shipping: Double,
     val total: Double,
     val unitPrices: List<Double>,
-    val inrSubtotalByOrigin: Map<String, Double>
+    val inrSubtotalByOrigin: Map<String, Double>,
+    val singleShipment: UkShippingRate?
 )
 
 internal object UkCheckoutCalculator {
@@ -120,6 +121,9 @@ internal object UkCheckoutCalculator {
         shipping = round(shipping)
         val total = round(subtotal - discount + shipping)
         if (!total.isFinite() || total <= 0) throw CheckoutException("Invalid checkout total.")
-        return UkCheckoutAmounts(subtotal, discount, shipping, total, unitPrices, subtotalByOrigin)
+        return UkCheckoutAmounts(
+            subtotal, discount, shipping, total, unitPrices, subtotalByOrigin,
+            shippingGroups.singleOrNull()?.second
+        )
     }
 }

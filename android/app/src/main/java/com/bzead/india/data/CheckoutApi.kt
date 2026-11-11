@@ -43,6 +43,13 @@ data class MinimumOrderConstraint(
     val isMet: Boolean
 )
 
+data class CheckoutShippingDetails(
+    val provider: String,
+    val carrier: String?,
+    val service: String?,
+    val rateId: String?
+)
+
 /** Result of the web `calculateDestinationCheckoutPricing` for an India destination (INR). */
 data class CheckoutQuote(
     val subtotal: Double,
@@ -56,7 +63,8 @@ data class CheckoutQuote(
     /** Verified variant id / sku per input item (null when the product has no variants). */
     val variantIds: List<String?>,
     val variantSkus: List<String?>,
-    val minimumOrder: MinimumOrderConstraint?
+    val minimumOrder: MinimumOrderConstraint?,
+    val shippingDetails: CheckoutShippingDetails? = null
 )
 
 data class RazorpayOrder(val orderId: String, val keyId: String, val amount: Long, val currency: String)
@@ -179,7 +187,7 @@ internal object CheckoutApi {
         token: String
     ): Map<Int, Pair<VariantMatch, Double>> {
         val productIds = items.map { it.productId }.distinct()
-        val res = get("product_variants?select=id,product_id,sku,price,size,color&product_id=${ids(productIds)}", token)
+        val res = get("product_variants?select=id,product_id,sku,price,size,size_value,color&product_id=${ids(productIds)}", token)
         if (!res.ok) throw CheckoutException("Unable to verify selected product variants: ${res.error}")
         val byProduct = rows(res).groupBy { str(it, "product_id") }
 
@@ -247,7 +255,7 @@ internal object CheckoutApi {
         val valid = items.filter { it.cartItemId.isNotBlank() && it.productId.isNotBlank() }
         if (valid.isEmpty()) return CartPriceResult(emptyMap(), emptyMap(), emptyMap(), null)
         val productIds = valid.map { it.productId }.distinct()
-        val res = get("product_variants?select=id,product_id,sku,price,size,color&product_id=${ids(productIds)}", token)
+        val res = get("product_variants?select=id,product_id,sku,price,size,size_value,color&product_id=${ids(productIds)}", token)
         if (!res.ok) return CartPriceResult(emptyMap(), emptyMap(), emptyMap(), "Unable to verify selected product variants: ${res.error}")
         val byProduct = rows(res).groupBy { str(it, "product_id") }
 
@@ -458,7 +466,8 @@ internal object CheckoutApi {
         }
         return CheckoutQuote(
             amounts.subtotal, amounts.discount, amounts.shipping, amounts.total,
-            amounts.shipping, 0.0, amounts.unitPrices, variantIds, variantSkus, minimum
+            amounts.shipping, 0.0, amounts.unitPrices, variantIds, variantSkus, minimum,
+            amounts.singleShipment?.let { CheckoutShippingDetails(it.provider, it.carrier, it.service, it.rateId) }
         )
     }
 

@@ -1244,7 +1244,10 @@ object BzeadRepository {
             .put("p_currency", "GBP")
             .put("p_idempotency_key", "stripe_${payment.paymentIntentId}")
             .put("p_payment_method", "stripe")
-            .put("p_shipping_provider", JSONObject.NULL)
+            .put("p_shipping_provider", summary.quote.shippingDetails?.provider ?: JSONObject.NULL)
+            .put("p_shipping_carrier", summary.quote.shippingDetails?.carrier ?: JSONObject.NULL)
+            .put("p_shipping_service_level", summary.quote.shippingDetails?.service ?: JSONObject.NULL)
+            .put("p_shipping_rate_id", summary.quote.shippingDetails?.rateId ?: JSONObject.NULL)
         StripePaymentApi.saveRecoverySnapshot(token, uid, payment, params)
         return PreparedStripePayment(payment, summary.quote.total, uid, summary.items.map { it.cartItemId }.toSet())
     }
