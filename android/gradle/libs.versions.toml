@@ -32,6 +32,7 @@ cameraCore = "1.5.0"
 loggingInterceptor = "4.10.0"
 okhttp = "4.10.0"
 razorpayCheckout = "1.6.41"
+stripeAndroid = "23.26.0"
 moshiKotlin = "1.15.2"
 moshiKotlinCodegen = "1.15.2"
 datastorePreferences = "1.1.7"
@@ -83,6 +84,7 @@ androidx-camera-core = { group = "androidx.camera", name = "camera-core", versio
 logging-interceptor = { group = "com.squareup.okhttp3", name = "logging-interceptor", version.ref = "loggingInterceptor" }
 okhttp = { group = "com.squareup.okhttp3", name = "okhttp", version.ref = "okhttp" }
 razorpay-checkout = { group = "com.razorpay", name = "checkout", version.ref = "razorpayCheckout" }
+stripe-android = { group = "com.stripe", name = "stripe-android", version.ref = "stripeAndroid" }
 moshi-kotlin = { group = "com.squareup.moshi", name = "moshi-kotlin", version.ref = "moshiKotlin" }
 moshi-kotlin-codegen = { group = "com.squareup.moshi", name = "moshi-kotlin-codegen", version.ref = "moshiKotlinCodegen" }
 androidx-datastore-preferences = { group = "androidx.datastore", name = "datastore-preferences", version.ref = "datastorePreferences" }

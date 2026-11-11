@@ -70,6 +70,10 @@ fun CheckoutScreen(
     onOrderPlaced: (String) -> Unit,
     modifier: Modifier = Modifier
 ) {
+    if (com.bzead.india.data.StorefrontMarket.isUk) {
+        UkStripeCheckoutScreen(onNavigateBack, onOrderPlaced, modifier)
+        return
+    }
     val selectedAddress by BzeadRepository.selectedAddress.collectAsState()
     val addresses by BzeadRepository.addresses.collectAsState()
     val activeAddress = selectedAddress ?: addresses.firstOrNull()

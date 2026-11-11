@@ -1198,6 +1198,83 @@ object BzeadRepository {
         val razorpayOrder: RazorpayOrder
     )
 
+    internal class PreparedStripePayment(
+        val session: StripePaymentSession,
+        val total: Double,
+        val userId: String,
+        val purchasedCartItemIds: Set<String>
+    )
+
+    internal suspend fun prepareStripePayment(): PreparedStripePayment {
+        val summary = loadOrderSummary()
+        if (!summary.serviceable || summary.missingWeightNames.isNotEmpty()) {
+            throw CheckoutException("Shipping is not available for this order.")
+        }
+        minimumOrderMessage(summary.address, summary.quote)?.let { throw CheckoutException(it) }
+        recheckStock(summary.items)?.let { throw CheckoutException(it) }
+        val uid = session?.userId ?: throw CheckoutException("Authentication expired. Please log in again.")
+        val token = checkoutToken()
+        val address = summary.address
+        val shipping = JSONObject()
+            .put("street", address.streetAddress)
+            .put("city", address.city)
+            .put("state", address.state)
+            .put("postalCode", address.pinCode)
+            .put("country", address.country)
+            .put("countryCode", "GB")
+            .put("full_name", address.fullName)
+            .put("phone", address.phoneNumber)
+        val productMeta = CheckoutApi.fetchProductMeta(summary.items.map { it.productId }, token)
+        val payment = StripePaymentApi.createSession(token, summary.quote.total, summary.items.size)
+        val params = CheckoutApi.buildRpcParams(
+            customerId = uid,
+            items = summary.items,
+            productMeta = productMeta,
+            shippingAddress = shipping,
+            billingAddress = JSONObject(shipping.toString()),
+            customerPhone = address.phoneNumber,
+            notes = address.deliveryNotes,
+            paymentIntentId = payment.paymentIntentId,
+            shippingAmount = summary.quote.shipping,
+            actualShippingCost = summary.quote.actualShippingCost,
+            platformShippingMargin = summary.quote.platformShippingMargin,
+            expectedDeliveryDate = summary.estimatedDeliveryDate,
+            expectedDeliveryDays = null
+        )
+            .put("p_currency", "GBP")
+            .put("p_idempotency_key", "stripe_${payment.paymentIntentId}")
+            .put("p_payment_method", "stripe")
+            .put("p_shipping_provider", JSONObject.NULL)
+        StripePaymentApi.saveRecoverySnapshot(token, uid, payment, params)
+        return PreparedStripePayment(payment, summary.quote.total, uid, summary.items.map { it.cartItemId }.toSet())
+    }
+
+    internal suspend fun confirmStripeOrder(prepared: PreparedStripePayment): String? {
+        if (session?.userId != prepared.userId) throw CheckoutException("Please sign in to confirm your payment.")
+        val deadline = System.currentTimeMillis() + 30_000
+        while (System.currentTimeMillis() < deadline) {
+            val order = CheckoutApi.waitForOrder(checkoutToken(), prepared.session.paymentIntentId, 1_000, 1_500)
+            if (order != null && order.second.lowercase() in setOf("completed", "succeeded", "paid")) {
+                val purchased = _cartItems.value.filter { it.id in prepared.purchasedCartItemIds }
+                for (item in purchased) {
+                    if (UserDataApi.isUuid(item.product.id)) {
+                        val result = UserDataApi.deleteCartItem(checkoutToken(), prepared.userId, item)
+                        if (!result.ok) {
+                            _dataError.value = "Your order is confirmed, but an item could not be removed from your cart."
+                            continue
+                        }
+                    }
+                    _cartItems.value = _cartItems.value.filterNot { it.id == item.id }
+                }
+                checkoutSelectedIds.value = emptySet()
+                loadOrders(prepared.userId)
+                return order.first
+            }
+            kotlinx.coroutines.delay(1500)
+        }
+        return null
+    }
+
     /** Web Checkout mount: refresh the live quote, enforce the minimum order, then create the Razorpay order. */
     suspend fun prepareRazorpayPayment(): PreparedPayment {
         MarketCheckoutGuard.requireRazorpayAvailable(com.bzead.india.BuildConfig.APPLICATION_ID)

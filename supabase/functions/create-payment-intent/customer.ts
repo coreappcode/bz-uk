@@ -20,6 +20,22 @@ export function savedCardSessionParams(customerId: string) {
   };
 }
 
+export function mobileSavedCardSessionParams(customerId: string) {
+  return {
+    customer: customerId,
+    components: {
+      mobile_payment_element: {
+        enabled: true,
+        features: {
+          payment_method_save: "enabled",
+          payment_method_redisplay: "enabled",
+          payment_method_remove: "enabled",
+        } as const,
+      },
+    },
+  };
+}
+
 export async function getOrCreateStripeCustomer(
   store: CustomerStore,
   create: (idempotencyKey: string) => Promise<string>,

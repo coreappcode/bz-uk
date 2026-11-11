@@ -145,6 +145,14 @@ The India quote engine and Razorpay checkout are blocked for the UK application 
 UK pricing and native Stripe payment flow is implemented and verified. Do not
 release it as a working UK shopping app based on its application ID alone.
 
+The Android project includes a UK shipping rate-card/carrier adapter and Stripe
+PaymentSheet scaffolding, but neither is connected to a complete UK checkout
+quote. The separate `create-android-payment-intent` function has not been
+deployed; its client-supplied amount must be replaced with a server-verified UK
+quote before enabling payments. Validate shipping, customer-session card saving,
+3-D Secure, webhook recovery, and charge/order amounts in Stripe test mode
+before removing the checkout guard. The live web payment function is unchanged.
+
 ### Market selection
 
 `src/config/market.ts` defines the UK country name/code and GBP currency.

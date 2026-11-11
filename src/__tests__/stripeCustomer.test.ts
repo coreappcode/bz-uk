@@ -1,7 +1,22 @@
 import { describe, expect, it, vi } from 'vitest';
-import { getOrCreateStripeCustomer, savedCardSessionParams, type CustomerStore } from '../../supabase/functions/create-payment-intent/customer';
+import { getOrCreateStripeCustomer, mobileSavedCardSessionParams, savedCardSessionParams, type CustomerStore } from '../../supabase/functions/create-payment-intent/customer';
 
 describe('saved Stripe payment methods', () => {
+  it('uses the mobile payment element for native card saving and redisplay', () => {
+    expect(mobileSavedCardSessionParams('cus_123')).toEqual({
+      customer: 'cus_123',
+      components: {
+        mobile_payment_element: {
+          enabled: true,
+          features: {
+            payment_method_save: 'enabled',
+            payment_method_redisplay: 'enabled',
+            payment_method_remove: 'enabled',
+          },
+        },
+      },
+    });
+  });
   it('enables opt-in saving, reuse, and removal for on-session purchases', () => {
     expect(savedCardSessionParams('cus_123')).toEqual({
       customer: 'cus_123',
