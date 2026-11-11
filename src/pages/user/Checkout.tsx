@@ -582,9 +582,11 @@ const CheckoutForm: React.FC<
   const [sameAsShipping, setSameAsShipping] = useState(true);
 
   // The web checkout accepts cards only; wallet buttons are not offered.
+  // Stripe Link's "save my information" section is only offered when the buyer opts in.
+  const [saveInfoForLink, setSaveInfoForLink] = useState(false);
   const paymentElementOptions: StripePaymentElementOptions = {
     layout: 'tabs',
-    wallets: { applePay: 'never', googlePay: 'never' },
+    wallets: { applePay: 'never', googlePay: 'never', link: saveInfoForLink ? 'auto' : 'never' },
   };
 
   // COD vs Stripe toggle
@@ -1579,7 +1581,17 @@ const CheckoutForm: React.FC<
             </div>
           </div>
 
-          <PaymentElement options={paymentElementOptions} />
+          <label className="flex cursor-pointer items-center gap-2 text-sm font-medium text-slate-800">
+            <input
+              type="checkbox"
+              checked={saveInfoForLink}
+              onChange={(e) => setSaveInfoForLink(e.target.checked)}
+              className="h-5 w-5 accent-[#6D28D9]"
+            />
+            Save my information for faster checkout
+          </label>
+
+          <PaymentElement key={saveInfoForLink ? 'link-on' : 'link-off'} options={paymentElementOptions} />
 
           <div className="flex items-center gap-3 rounded-xl bg-[#6D28D9]/5 px-4 py-3">
             <ShieldCheck size={26} className="shrink-0 text-[#6D28D9]" />
