@@ -174,7 +174,9 @@ internal object UkShippingApi {
                 "&product_origin_country_id=eq.${SupabaseRest.enc(originId)}&destination_country_id=eq.${SupabaseRest.enc(destinationId)}&order=weight_band_from.asc",
             token
         )
-        if (!response.ok) throw CheckoutException("Unable to load shipping rate cards: ${response.error}")
+        if (!response.ok) {
+            android.util.Log.w("BzeadCheckout", "Shipping rate card lookup failed: ${response.error}; trying carrier.")
+        }
         val bands = (0 until response.rows.length()).mapNotNull { index ->
             response.rows.optJSONObject(index)?.let { row ->
                 UkRateBand(
@@ -219,12 +221,17 @@ internal object UkShippingApi {
                 .put("height_cm", shipment.heightCm)
         } else {
             JSONObject().put("pickup_postcode", pickupPostcode)
-                .put("delivery_country", "United Kingdom").put("delivery_postcode", destinationPostcode)
+                .put("delivery_postcode", destinationPostcode)
                 .put("weight", shipment.weightKg)
+                .apply {
+                    if (originId == destinationId) put("domestic", true).put("cod", false)
+                    else put("delivery_country", "United Kingdom")
+                }
         }
         val result = SupabaseRest.callFunction(if (shippo) "shippo-rate" else "shiprocket-rate", token, request)
         if (!result.ok) throw CheckoutException("Unable to obtain a shipping rate. Please try again.")
         val body = result.json() ?: throw CheckoutException("The shipping provider returned an invalid response.")
-        return parseProviderRate(body, shippo, originIso, domestic = originId == destinationId)
+        val rate = parseProviderRate(body, shippo, originIso, domestic = originId == destinationId)
+        return if (!shippo && originId == destinationId) rate.copy(tiers = emptyMap()) else rate
     }
 }

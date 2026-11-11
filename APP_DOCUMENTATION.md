@@ -189,12 +189,13 @@ end-to-end verification. If the webhook never runs, its email and Stripe fee
 processing are not performed by this recovery path.
 The experimental UK quote groups shipments by seller and origin, and exposes
 configured standard, premium and express options. Its calculation is a
-separate Android implementation, not a shared web quote engine: carrier
-response timing, missing pickup information and exchange-rate fallback can
-differ from the web. It uses the standard international Shippo tier and
-calculates available delivery tiers using the web's standard-rate delta approach.
-Multi-seller, mixed-origin and delivery-option parity remains unverified before
-checkout can be enabled.
+separate Android implementation, not a shared web quote engine. Carrier
+requests follow the web's grouped, concurrent lookup phases and first-result
+tier selection; rate-card and exchange-rate lookup can fall back to the same
+backend services. A failed shipment is reported rather than silently pricing it
+at zero or using an unverified placeholder. The web's first-result tier choice
+can vary with carrier timing, so independently requested quotes may differ.
+Multi-seller, mixed-origin and delivery-option parity remains unverified.
 
 ### Market selection
 

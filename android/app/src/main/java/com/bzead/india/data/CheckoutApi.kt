@@ -429,7 +429,7 @@ internal object CheckoutApi {
             }
             val country = countryById[originId] ?: throw CheckoutException("Product origin is unavailable.")
             val originIso = str(country, "iso2").ifBlank { str(country, "country_code") }.uppercase()
-            val currency = str(product, "currency").trim().uppercase()
+            val currency = str(product, "currency").trim().uppercase().ifBlank { "INR" }
             val variant = variants[index]
             val price = variant?.second ?: productPrices[item.productId]
                 ?: throw CheckoutException("Unable to verify the price of \"${item.productName}\".")

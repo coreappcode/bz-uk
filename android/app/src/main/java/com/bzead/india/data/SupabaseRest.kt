@@ -55,6 +55,21 @@ internal object SupabaseRest {
         }
     }
 
+    suspend fun getFunction(name: String, token: String): RawResult = withContext(Dispatchers.IO) {
+        try {
+            val req = Request.Builder()
+                .url("${SupabaseClient.HOST_URL}/functions/v1/$name")
+                .header("apikey", SupabaseClient.ANON_KEY)
+                .header("Authorization", "Bearer $token")
+                .get()
+                .build()
+            client.newCall(req).execute().use { res -> RawResult(res.code, res.body?.string().orEmpty()) }
+        } catch (e: java.io.IOException) {
+            android.util.Log.w("SupabaseRest", "Function $name request failed", e)
+            RawResult(-1, "")
+        }
+    }
+
     suspend fun request(
         method: String,
         path: String,

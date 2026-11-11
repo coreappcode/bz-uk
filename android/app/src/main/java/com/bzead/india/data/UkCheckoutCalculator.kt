@@ -1,5 +1,9 @@
 package com.bzead.india.data
 
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.coroutineScope
+import java.util.concurrent.atomic.AtomicLong
 import kotlin.math.floor
 import kotlin.math.max
 import kotlin.math.min
@@ -91,15 +95,32 @@ internal object UkCheckoutCalculator {
             subtotalByOrigin[origin] = (subtotalByOrigin[origin] ?: 0.0) + convert(total, line.currency, "INR")
         }
 
-        val shippingGroups = mutableListOf<Pair<List<UkCheckoutLine>, UkShippingRate>>()
-        for (group in lines.groupBy { it.sellerId to it.originId }.values) {
+        val groups = lines.groupBy { it.sellerId to it.originId }.values
+        val completionOrder = AtomicLong()
+        val completedGroups = mutableListOf<Triple<List<UkCheckoutLine>, UkShippingRate, Long>>()
+        for (group in groups) {
             if (group.any { it.originIso != group[0].originIso || it.pickupPostcode != group[0].pickupPostcode }) {
                 throw CheckoutException("Inconsistent seller shipping information.")
             }
-            val result = quoteShipping(group)
-            if (!result.amount.isFinite() || result.amount < 0) throw CheckoutException("Invalid shipping rate.")
-            shippingGroups.add(group to result)
         }
+        for (phase in 0..3) {
+            val phaseGroups = groups.filter {
+                val domestic = it[0].originIso.trim().equals("GB", ignoreCase = true)
+                val phaseForGroup = (if (domestic) 0 else 2) + if (it[0].shippoOrigin) 1 else 0
+                phaseForGroup == phase
+            }
+            val results = coroutineScope {
+                phaseGroups.map { group ->
+                    async {
+                        val result = quoteShipping(group)
+                        if (!result.amount.isFinite() || result.amount < 0) throw CheckoutException("Invalid shipping rate.")
+                        Triple(group, result, completionOrder.getAndIncrement())
+                    }
+                }.awaitAll()
+            }
+            completedGroups.addAll(results)
+        }
+        val shippingGroups = completedGroups.map { it.first to it.second }
         val eligibleGroups = shippingGroups.filter { (group, rate) ->
             group[0].originIso.trim().uppercase() != "GB" && rate.provider == "shiprocket"
         }
@@ -124,11 +145,12 @@ internal object UkCheckoutCalculator {
         val total = round(subtotal - discount + shipping)
         if (!total.isFinite() || total <= 0) throw CheckoutException("Invalid checkout total.")
         val singleShipment = shippingGroups.singleOrNull()?.second
-        val internationalGroups = shippingGroups.filter { it.first[0].originIso.trim().uppercase() != "GB" }
-        val tierShipment = if (internationalGroups.isNotEmpty()) {
-            internationalGroups.firstOrNull { !it.first[0].shippoOrigin }
-                ?: internationalGroups.firstOrNull()
-        } else shippingGroups.firstOrNull()
+        val international = completedGroups.any { it.first[0].originIso.trim().uppercase() != "GB" }
+        val tierShipment = completedGroups
+            .filter { (group, rate, _) ->
+                (group[0].originIso.trim().uppercase() != "GB") == international && rate.tiers.isNotEmpty()
+            }
+            .minByOrNull { it.third }
         val availableTiers = tierShipment?.second?.tiers.orEmpty()
         val standard = availableTiers["standard"]
         val shippingOptions = if (standard != null) availableTiers.mapValues { (_, tier) ->
