@@ -88,13 +88,26 @@ internal object UkCheckoutCalculator {
             subtotalByOrigin[origin] = (subtotalByOrigin[origin] ?: 0.0) + convert(total, line.currency, "INR")
         }
 
-        var shipping = 0.0
+        val shippingGroups = mutableListOf<Pair<List<UkCheckoutLine>, UkShippingRate>>()
         for (group in lines.groupBy { it.sellerId to it.originId }.values) {
             if (group.any { it.originIso != group[0].originIso || it.pickupPostcode != group[0].pickupPostcode }) {
                 throw CheckoutException("Inconsistent seller shipping information.")
             }
             val result = quoteShipping(group)
             if (!result.amount.isFinite() || result.amount < 0) throw CheckoutException("Invalid shipping rate.")
+            shippingGroups.add(group to result)
+        }
+        val eligibleGroups = shippingGroups.filter { (group, rate) ->
+            group[0].originIso.trim().uppercase() != "GB" && rate.provider == "shiprocket"
+        }
+        val threshold = eligibleGroups.mapNotNull { it.second.freeShippingAboveInr }
+            .filter { it.isFinite() && it > 0 }.maxOrNull()
+        val eligibleOrigins = eligibleGroups.map { it.first[0].originIso.trim().uppercase() }.toSet()
+        val eligibleSubtotal = eligibleOrigins.sumOf { subtotalByOrigin[it] ?: 0.0 }
+        val freeShipping = threshold != null && eligibleSubtotal >= threshold
+        var shipping = 0.0
+        for ((group, result) in shippingGroups) {
+            if (freeShipping && result.provider == "shiprocket" && group[0].originIso.trim().uppercase() != "GB") continue
             val totalWeight = group.sumOf { max(it.parcel.weightKg, 0.1) * it.quantity }
             if (!totalWeight.isFinite() || totalWeight <= 0) throw CheckoutException("Invalid product weight.")
             for (line in group) {

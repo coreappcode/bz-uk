@@ -25,7 +25,8 @@ internal data class UkShippingRate(
     val provider: String,
     val carrier: String? = null,
     val service: String? = null,
-    val rateId: String? = null
+    val rateId: String? = null,
+    val freeShippingAboveInr: Double? = null
 )
 
 internal data class UkRateBand(
@@ -64,6 +65,41 @@ internal object UkShippingApi {
             band.from.isFinite() && band.to.isFinite() && band.to > band.from &&
                 weight >= band.from && (weight < band.to || (index == bands.lastIndex && weight <= band.to))
         }?.value
+    }
+
+    fun parseProviderRate(body: JSONObject, shippo: Boolean, originIso: String): UkShippingRate {
+        val tier = if (shippo) {
+            body.optJSONObject("cheapest")?.takeIf { it.has("rate") && !it.isNull("rate") }
+                ?: body.optJSONObject("tiers")?.optJSONObject("standard")
+        } else {
+            val tiers = body.optJSONArray("tiers")
+            (0 until (tiers?.length() ?: 0)).mapNotNull { tiers?.optJSONObject(it) }
+                .firstOrNull { it.optString("tier") == "standard" }
+        } ?: throw CheckoutException("No shipping is available for this route.")
+        val amount = tier.optDouble("rate", Double.NaN)
+        val currency = if (shippo) {
+            tier.optString("currency").trim().uppercase().ifEmpty {
+                body.optJSONObject("tiers")?.optJSONObject("standard")?.optString("currency").orEmpty().trim().uppercase()
+            }.ifEmpty {
+                when (originIso.uppercase()) {
+                    "US" -> "USD"
+                    "CA" -> "CAD"
+                    "GB" -> "GBP"
+                    else -> "EUR"
+                }
+            }
+        } else "INR"
+        if (!amount.isFinite() || amount < 0) {
+            throw CheckoutException("The shipping provider returned an invalid rate.")
+        }
+        return UkShippingRate(
+            amount, currency, if (shippo) "shippo" else "shiprocket",
+            tier.optString("courier_name").ifBlank { null },
+            tier.optString("service_level").ifBlank { null },
+            tier.optString("rate_id").ifBlank { null },
+            if (shippo) null else body.optDouble("freeShippingAboveInr", Double.NaN)
+                .takeIf { it.isFinite() && it > 0 }
+        )
     }
 
     suspend fun quote(
@@ -120,23 +156,6 @@ internal object UkShippingApi {
         val result = SupabaseRest.callFunction(if (shippo) "shippo-rate" else "shiprocket-rate", token, request)
         if (!result.ok) throw CheckoutException("Unable to obtain a shipping rate. Please try again.")
         val body = result.json() ?: throw CheckoutException("The shipping provider returned an invalid response.")
-        val tier = if (shippo) {
-            body.optJSONObject("cheapest") ?: body.optJSONObject("tiers")?.optJSONObject("standard")
-        } else {
-            val tiers = body.optJSONArray("tiers")
-            (0 until (tiers?.length() ?: 0)).mapNotNull { tiers?.optJSONObject(it) }
-                .firstOrNull { it.optString("tier") == "standard" }
-        } ?: throw CheckoutException("No shipping is available for this route.")
-        val amount = tier.optDouble("rate", Double.NaN)
-        val currency = if (shippo) tier.optString("currency").trim().uppercase() else "INR"
-        if (!amount.isFinite() || amount < 0 || currency.isBlank()) {
-            throw CheckoutException("The shipping provider returned an invalid rate.")
-        }
-        return UkShippingRate(
-            amount, currency, if (shippo) "shippo" else "shiprocket",
-            tier.optString("courier_name").ifBlank { null },
-            tier.optString("service_level").ifBlank { null },
-            tier.optString("rate_id").ifBlank { null }
-        )
+        return parseProviderRate(body, shippo, originIso)
     }
 }

@@ -63,4 +63,31 @@ class UkCheckoutCalculatorTest {
         val item = line("one", 3).copy(offers = listOf(UkCheckoutOffer("buy_x_get_y", buyQuantity = 1, freeQuantity = 2)))
         assertEquals(30.0, UkCheckoutCalculator.discount(item), 0.0)
     }
+
+    @Test
+    fun freeShippingThresholdAppliesOnlyToLiveInternationalShiprocketGroups() = runBlocking {
+        val lines = listOf(
+            line("one", currency = "INR").copy(originIso = "IN", originId = "india"),
+            line("two", currency = "INR").copy(originIso = "IN", originId = "india"),
+            line("three").copy(originIso = "GB", originId = "uk")
+        )
+        val quote = UkCheckoutCalculator.calculate(lines, mapOf("INR" to 100.0, "GBP" to 1.0)) { group ->
+            when (group.first().sellerId) {
+                "one" -> UkShippingRate(100.0, "INR", "shiprocket", freeShippingAboveInr = 20.0)
+                "two" -> UkShippingRate(200.0, "INR", "bzead-rate-card")
+                else -> UkShippingRate(3.0, "GBP", "shippo")
+            }
+        }
+        assertEquals(5.0, quote.shipping, 0.001)
+        assertEquals(15.20, quote.total, 0.001)
+    }
+
+    @Test
+    fun freeShippingDoesNotApplyBelowThreshold() = runBlocking {
+        val quote = UkCheckoutCalculator.calculate(
+            listOf(line("one", currency = "INR").copy(originIso = "IN")),
+            mapOf("INR" to 100.0, "GBP" to 1.0)
+        ) { UkShippingRate(100.0, "INR", "shiprocket", freeShippingAboveInr = 11.0) }
+        assertEquals(1.0, quote.shipping, 0.001)
+    }
 }
