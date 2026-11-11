@@ -178,6 +178,10 @@ deployed; its client-supplied amount must be replaced with a server-verified UK
 quote before enabling payments. Validate shipping, customer-session card saving,
 3-D Secure, webhook recovery, and charge/order amounts in Stripe test mode
 before removing the checkout guard. The live web payment function is unchanged.
+The separate Android Stripe status verification function checks the authenticated
+buyer and the Stripe payment status; it has not been deployed and does not
+validate the checkout quote or replace order recovery. Its comparison with the
+app's prepared amount is a consistency check, not an authoritative quote.
 
 ### Market selection
 

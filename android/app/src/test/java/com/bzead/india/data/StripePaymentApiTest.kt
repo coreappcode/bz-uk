@@ -31,6 +31,14 @@ class StripePaymentApiTest {
     }
 
     @Test
+    fun parsesOnlyExplicitServerPaymentStatuses() {
+        assertEquals(StripePaymentApi.PaymentStatus.SUCCEEDED, StripePaymentApi.parsePaymentStatus(JSONObject().put("status", "succeeded")))
+        assertEquals(StripePaymentApi.PaymentStatus.PENDING, StripePaymentApi.parsePaymentStatus(JSONObject().put("status", "pending")))
+        assertEquals(StripePaymentApi.PaymentStatus.FAILED, StripePaymentApi.parsePaymentStatus(JSONObject().put("status", "failed")))
+        assertThrows(CheckoutException::class.java) { StripePaymentApi.parsePaymentStatus(JSONObject().put("status", "paid")) }
+    }
+
+    @Test
     fun ukPaymentSessionRemainsBlockedUntilCheckoutQuoteIsVerified() {
         assertThrows(CheckoutException::class.java) {
             runBlocking { StripePaymentApi.createSession("unused", 12.34, 1) }

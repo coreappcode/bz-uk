@@ -11,6 +11,24 @@ internal data class StripePaymentSession(
 )
 
 internal object StripePaymentApi {
+    enum class PaymentStatus { SUCCEEDED, PENDING, FAILED }
+
+    fun parsePaymentStatus(body: JSONObject): PaymentStatus = when (body.optString("status")) {
+        "succeeded" -> PaymentStatus.SUCCEEDED
+        "pending" -> PaymentStatus.PENDING
+        "failed" -> PaymentStatus.FAILED
+        else -> throw CheckoutException("The payment verification response is invalid.")
+    }
+
+    suspend fun verifyPayment(token: String, paymentIntentId: String, totalGbp: Double): PaymentStatus {
+        val result = SupabaseRest.callFunction(
+            "verify-android-stripe-payment", token,
+            JSONObject().put("paymentIntentId", paymentIntentId).put("expectedAmount", amountInPence(totalGbp))
+        )
+        if (!result.ok) throw CheckoutException("Unable to verify payment. Please check your orders before paying again.")
+        return parsePaymentStatus(result.json() ?: throw CheckoutException("The payment verification response is invalid."))
+    }
+
     fun amountInPence(total: Double): Long {
         if (!total.isFinite() || total <= 0 || total > 50_000.0) {
             throw CheckoutException("Invalid GBP checkout total.")

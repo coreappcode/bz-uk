@@ -1252,7 +1252,18 @@ object BzeadRepository {
     internal suspend fun confirmStripeOrder(prepared: PreparedStripePayment): String? {
         if (session?.userId != prepared.userId) throw CheckoutException("Please sign in to confirm your payment.")
         val deadline = System.currentTimeMillis() + 30_000
+        var verified = false
         while (System.currentTimeMillis() < deadline) {
+            if (!verified) {
+                when (StripePaymentApi.verifyPayment(checkoutToken(), prepared.session.paymentIntentId, prepared.total)) {
+                    StripePaymentApi.PaymentStatus.SUCCEEDED -> verified = true
+                    StripePaymentApi.PaymentStatus.FAILED -> throw CheckoutException("Payment was not completed. Check your orders before trying again.")
+                    StripePaymentApi.PaymentStatus.PENDING -> {
+                        kotlinx.coroutines.delay(1500)
+                        continue
+                    }
+                }
+            }
             val order = CheckoutApi.waitForOrder(checkoutToken(), prepared.session.paymentIntentId, 1_000, 1_500)
             if (order != null && order.second.lowercase() in setOf("completed", "succeeded", "paid")) {
                 val purchased = _cartItems.value.filter { it.id in prepared.purchasedCartItemIds }
