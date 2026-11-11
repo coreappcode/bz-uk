@@ -1,8 +1,7 @@
 /**
  * Stripe client-side service
  *
- * Development: calls Vite dev middleware at /api/create-payment-intent
- * Production: calls Supabase Edge Function via supabase.functions.invoke()
+ * Calls the authenticated Supabase Edge Function to initialize Stripe.
  */
 
 import { loadStripe, type Stripe } from '@stripe/stripe-js';
@@ -36,6 +35,24 @@ interface CreatePaymentIntentParams {
 interface PaymentIntentResult {
   clientSecret: string;
   paymentIntentId: string;
+  customerSessionClientSecret: string;
+}
+
+function parsePaymentIntentResult(data: unknown): PaymentIntentResult {
+  if (
+    typeof data !== 'object' || data === null
+    || !('clientSecret' in data) || typeof data.clientSecret !== 'string' || !data.clientSecret
+    || !('paymentIntentId' in data) || typeof data.paymentIntentId !== 'string' || !data.paymentIntentId
+    || !('customerSessionClientSecret' in data)
+    || typeof data.customerSessionClientSecret !== 'string' || !data.customerSessionClientSecret
+  ) {
+    throw new Error('Payment initialization did not provide a saved-card session. Please try again.');
+  }
+  return {
+    clientSecret: data.clientSecret,
+    paymentIntentId: data.paymentIntentId,
+    customerSessionClientSecret: data.customerSessionClientSecret,
+  };
 }
 
 const extractFunctionErrorMessage = async (error: any): Promise<string> => {
@@ -71,8 +88,7 @@ const extractFunctionErrorMessage = async (error: any): Promise<string> => {
 /**
  * Create a Stripe PaymentIntent.
  *
- * - In development, hits the Vite dev middleware (/api/create-payment-intent)
- * - In production, calls the Supabase Edge Function
+ * Uses the same authenticated Edge Function in development and production.
  */
 export async function createPaymentIntent(
   params: CreatePaymentIntentParams
@@ -85,75 +101,24 @@ export async function createPaymentIntent(
     client: isNativePlatform ? 'native' : 'web',
   };
 
-  if (import.meta.env.DEV) {
-    // Development: use Vite dev middleware
-    const res = await fetch('/api/create-payment-intent', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(requestBody),
-    });
-
-    if (!res.ok) {
-      const err = await res.json().catch(() => ({ error: 'Network error' }));
-      throw new Error(err.error || `HTTP ${res.status}`);
-    }
-
-    const result = await res.json();
-    if (!result?.clientSecret || !result?.paymentIntentId) {
-      throw new Error('Missing client secret or payment intent ID in dev response');
-    }
-    return result as PaymentIntentResult;
-  } else {
-    // Production: use Supabase Edge Function
-    // Force-refresh the session so the JWT is always fresh (WebViews cache aggressively)
-    const { data: { session }, error: refreshError } = await supabase.auth.refreshSession();
-    if (refreshError || !session?.access_token) {
-      // Fallback: try getSession in case refreshSession fails but token is still valid
-      const { data: { session: fallbackSession } } = await supabase.auth.getSession();
-      if (!fallbackSession?.access_token) {
-        throw new Error('Authentication expired. Please log in again.');
-      }
-      const headers: Record<string, string> = {
-        Authorization: `Bearer ${fallbackSession.access_token}`,
-      };
-
-      const { data, error } = await supabase.functions.invoke('create-payment-intent', {
-        body: requestBody,
-        headers,
-      });
-
-      if (error) {
-        const detailedMessage = await extractFunctionErrorMessage(error);
-        throw new Error(detailedMessage || 'Failed to create payment intent');
-      }
-
-      if (!data?.clientSecret || !data?.paymentIntentId) {
-        throw new Error(data?.error || 'Missing client secret or payment intent ID in response');
-      }
-
-      return data as PaymentIntentResult;
-    }
-
-    const headers: Record<string, string> = {
-      Authorization: `Bearer ${session.access_token}`,
-    };
-
-    const { data, error } = await supabase.functions.invoke('create-payment-intent', {
-      body: requestBody,
-      headers,
-    });
-
-    if (error) {
-      const detailedMessage = await extractFunctionErrorMessage(error);
-      throw new Error(detailedMessage || 'Failed to create payment intent');
-    }
-
-    if (!data?.clientSecret || !data?.paymentIntentId) {
-      throw new Error(data?.error || 'Missing client secret or payment intent ID in response');
-    }
-
-    return data as PaymentIntentResult;
+  // Refresh for WebViews; retain a still-valid session if refreshing fails.
+  const { data: { session }, error: refreshError } = await supabase.auth.refreshSession();
+  let token = session?.access_token;
+  if (refreshError || !token) {
+    const { data: { session: fallbackSession } } = await supabase.auth.getSession();
+    token = fallbackSession?.access_token;
   }
+  if (!token) throw new Error('Authentication expired. Please log in again.');
+
+  const { data, error } = await supabase.functions.invoke('create-payment-intent', {
+    body: requestBody,
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  if (error) {
+    const detailedMessage = await extractFunctionErrorMessage(error);
+    throw new Error(detailedMessage || 'Failed to create payment intent');
+  }
+  return parsePaymentIntentResult(data);
 }
 
 /**

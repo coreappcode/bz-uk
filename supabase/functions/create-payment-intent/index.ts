@@ -5,9 +5,11 @@
 // Set secret: supabase secrets set STRIPE_SECRET_KEY=your_stripe_secret_key
 //
 // Request body: { amount: number, currency: string, metadata?: Record<string, string> }
-// Response:     { clientSecret: string, paymentIntentId: string }
+// Response:     { clientSecret, paymentIntentId, customerSessionClientSecret }
 
-import Stripe from "https://esm.sh/stripe@14.14.0?target=deno";
+import Stripe from "https://esm.sh/stripe@17.7.0?target=deno";
+import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { getOrCreateStripeCustomer, savedCardSessionParams } from "./customer.ts";
 
 const ALLOWED_ORIGINS = [
   'https://bzead.uk',
@@ -152,7 +154,7 @@ Deno.serve(async (req: Request) => {
 
     // 5. Create Stripe PaymentIntent
     const stripe = new Stripe(stripeKey, {
-      apiVersion: "2023-10-16",
+      apiVersion: "2025-02-24.acacia",
       httpClient: Stripe.createFetchHttpClient(),
     });
 
@@ -168,9 +170,51 @@ Deno.serve(async (req: Request) => {
       );
     }
 
+    const supabaseUrl = Deno.env.get("SUPABASE_URL");
+    const serviceRoleKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
+    if (!supabaseUrl || !serviceRoleKey) {
+      throw new Error("Server configuration error");
+    }
+    const db = createClient(supabaseUrl, serviceRoleKey);
+    const account = await stripe.accounts.retrieve();
+    if (!/^(sk|rk)_(live|test)_/.test(stripeKey)) {
+      throw new Error("Unrecognized Stripe secret key mode");
+    }
+    const livemode = /^(sk|rk)_live_/.test(stripeKey);
+    const customerId = await getOrCreateStripeCustomer({
+      async find(id, accountId, live) {
+        const { data, error } = await db.from("stripe_customers")
+          .select("stripe_customer_id")
+          .eq("user_id", id)
+          .eq("stripe_account_id", accountId)
+          .eq("livemode", live)
+          .maybeSingle();
+        if (error) throw new Error(`Stripe customer lookup failed: ${error.message}`);
+        return data?.stripe_customer_id ?? null;
+      },
+      async insertIfAbsent(id, accountId, live, stripeCustomerId) {
+        const { error } = await db.from("stripe_customers").upsert({
+          user_id: id,
+          stripe_account_id: accountId,
+          livemode: live,
+          stripe_customer_id: stripeCustomerId,
+        }, { onConflict: "user_id,stripe_account_id,livemode", ignoreDuplicates: true });
+        if (error) throw new Error(`Stripe customer mapping failed: ${error.message}`);
+      },
+    }, async (idempotencyKey) => {
+      const customer = await stripe.customers.create(
+        { metadata: { user_id: userId } },
+        { idempotencyKey },
+      );
+      return customer.id;
+    }, userId, account.id, livemode);
+
+    const customerSession = await stripe.customerSessions.create(savedCardSessionParams(customerId));
+
     const paymentIntentPayload: Stripe.PaymentIntentCreateParams = {
       amount: Math.round(amount), // already in smallest unit from frontend
       currency: normalizedCurrency,
+      customer: customerId,
       metadata: {
         ...metadata,
         user_id: userId,
@@ -192,6 +236,7 @@ Deno.serve(async (req: Request) => {
       JSON.stringify({
         clientSecret: paymentIntent.client_secret,
         paymentIntentId: paymentIntent.id,
+        customerSessionClientSecret: customerSession.client_secret,
       }),
       {
         status: 200,
@@ -199,9 +244,9 @@ Deno.serve(async (req: Request) => {
       }
     );
   } catch (err) {
-    const message = err instanceof Error ? err.message : "Unknown error";
+    console.error("[create-payment-intent] Payment initialization failed:", err);
     return new Response(
-      JSON.stringify({ error: message }),
+      JSON.stringify({ error: "Unable to initialize secure payment. Please try again." }),
       {
         status: 500,
         headers: { ...corsHeaders, "Content-Type": "application/json" },

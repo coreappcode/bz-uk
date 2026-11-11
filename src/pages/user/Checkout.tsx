@@ -569,6 +569,7 @@ const CheckoutForm: React.FC<
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState(false);
+  const [paymentElementReady, setPaymentElementReady] = useState(false);
 
   const clearCheckoutCartState = useCallback(() => {
     clearCart();
@@ -582,11 +583,9 @@ const CheckoutForm: React.FC<
   const [sameAsShipping, setSameAsShipping] = useState(true);
 
   // The web checkout accepts cards only; wallet buttons are not offered.
-  // Stripe Link's "save my information" section is only offered when the buyer opts in.
-  const [saveInfoForLink, setSaveInfoForLink] = useState(false);
   const paymentElementOptions: StripePaymentElementOptions = {
     layout: 'tabs',
-    wallets: { applePay: 'never', googlePay: 'never', link: saveInfoForLink ? 'auto' : 'never' },
+    wallets: { applePay: 'never', googlePay: 'never', link: 'never' },
   };
 
   // COD vs Stripe toggle
@@ -1474,7 +1473,7 @@ const CheckoutForm: React.FC<
       <div className="order-2 space-y-4 lg:order-1">
       {/* Error — shown at the top so it's always visible */}
       {error && (
-        <div className="bg-red-50 border border-red-200 rounded-lg px-4 py-3 flex items-start gap-2.5">
+        <div role="alert" className="bg-red-50 border border-red-200 rounded-lg px-4 py-3 flex items-start gap-2.5">
           <AlertCircle size={18} className="text-red-500 flex-shrink-0 mt-0.5" />
           <p className="text-sm text-red-700">{error}</p>
         </div>
@@ -1581,17 +1580,15 @@ const CheckoutForm: React.FC<
             </div>
           </div>
 
-          <label className="flex cursor-pointer items-center gap-2 text-sm font-medium text-slate-800">
-            <input
-              type="checkbox"
-              checked={saveInfoForLink}
-              onChange={(e) => setSaveInfoForLink(e.target.checked)}
-              className="h-5 w-5 accent-[#6D28D9]"
-            />
-            Save my information for faster checkout
-          </label>
-
-          <PaymentElement key={saveInfoForLink ? 'link-on' : 'link-off'} options={paymentElementOptions} />
+          <PaymentElement
+            options={paymentElementOptions}
+            onReady={() => setPaymentElementReady(true)}
+            onLoadError={({ error: loadError }) => {
+              console.error('[Checkout] Stripe Payment Element failed to load:', loadError);
+              setPaymentElementReady(false);
+              setError('Unable to load secure payment details. Please refresh the page and try again.');
+            }}
+          />
 
           <div className="flex items-center gap-3 rounded-xl bg-[#6D28D9]/5 px-4 py-3">
             <ShieldCheck size={26} className="shrink-0 text-[#6D28D9]" />
@@ -1605,7 +1602,7 @@ const CheckoutForm: React.FC<
           <div className="flex flex-col gap-3 border-t border-slate-100 pt-4 sm:flex-row sm:items-center sm:justify-between">
             <button
               type="submit"
-              disabled={!stripe || !elements || isLoading}
+              disabled={!stripe || !elements || !paymentElementReady || isLoading}
               className="order-1 flex w-full items-center justify-center gap-2 rounded-xl bg-[#6D28D9] py-3.5 text-[15px] font-bold text-white transition-colors hover:bg-[#5b21b6] disabled:cursor-not-allowed disabled:bg-slate-200 disabled:text-slate-500 sm:order-2 sm:w-[60%]"
             >
               {isLoading ? (
@@ -1730,6 +1727,7 @@ const Checkout: React.FC = () => {
   const { rates, formatPrice } = useCurrency();
   const [clientSecret, setClientSecret] = useState<string | null>(null);
   const [paymentIntentId, setPaymentIntentId] = useState<string | null>(null);
+  const [customerSessionClientSecret, setCustomerSessionClientSecret] = useState<string | null>(null);
   const [initError, setInitError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [liveQuoteError, setLiveQuoteError] = useState<string | null>(null);
@@ -1749,8 +1747,6 @@ const Checkout: React.FC = () => {
   const [paymentInitRetryToken, setPaymentInitRetryToken] = useState(0);
   const [revolutRedirectLoading, setRevolutRedirectLoading] = useState(false);
   const quoteRequestRef = useRef(0);
-  // M7: Track last PI signature to avoid creating orphaned PaymentIntents
-  const lastPiSignatureRef = useRef<string | null>(null);
 
   // Fetch SKU/HSN for display
   useEffect(() => {
@@ -1855,6 +1851,7 @@ const Checkout: React.FC = () => {
       setInitError(liveQuoteError || 'Unable to refresh live shipping quote. Please go back to review and try again.');
       setClientSecret(null);
       setPaymentIntentId(null);
+      setCustomerSessionClientSecret(null);
       return;
     }
 
@@ -1872,6 +1869,7 @@ const Checkout: React.FC = () => {
       );
       setClientSecret(null);
       setPaymentIntentId(null);
+      setCustomerSessionClientSecret(null);
       return;
     }
 
@@ -1886,6 +1884,7 @@ const Checkout: React.FC = () => {
           if (!cancelled) {
             setClientSecret(null);
             setPaymentIntentId(null);
+            setCustomerSessionClientSecret(null);
           }
           return;
         }
@@ -1903,13 +1902,6 @@ const Checkout: React.FC = () => {
           throw new Error('Invalid checkout total. Please return to review and try again.');
         }
 
-        // M7: Skip if PI already exists for same amount+currency (avoid orphaned intents)
-        const piSignature = `${stripeAmount}-${checkoutCurrency}`;
-        if (lastPiSignatureRef.current === piSignature && clientSecret) {
-          setLoading(false);
-          return;
-        }
-
         const result = await createPaymentIntent({
           amount: stripeAmount,
           currency: checkoutCurrency.toLowerCase(),
@@ -1923,7 +1915,7 @@ const Checkout: React.FC = () => {
         if (!cancelled) {
           setClientSecret(result.clientSecret);
           setPaymentIntentId(result.paymentIntentId);
-          lastPiSignatureRef.current = piSignature;
+          setCustomerSessionClientSecret(result.customerSessionClientSecret);
         }
       } catch (err) {
         if (!cancelled) {
@@ -1931,6 +1923,7 @@ const Checkout: React.FC = () => {
           setInitError(err instanceof Error ? err.message : 'Failed to initialize payment');
           setClientSecret(null);
           setPaymentIntentId(null);
+          setCustomerSessionClientSecret(null);
         }
       } finally {
         if (!cancelled) setLoading(false);
@@ -2400,7 +2393,7 @@ const Checkout: React.FC = () => {
     }
   }
 
-  if (checkoutPaymentProvider === 'stripe' && !initError && (!clientSecret || !paymentIntentId)) {
+  if (checkoutPaymentProvider === 'stripe' && !initError && (!clientSecret || !paymentIntentId || !customerSessionClientSecret)) {
     return (
       <>
         <Header />
@@ -2506,9 +2499,11 @@ const Checkout: React.FC = () => {
           </div>
         ) : (
           <Elements
+            key={paymentIntentId}
             stripe={stripePromise}
             options={{
               clientSecret: clientSecret || '',
+              customerSessionClientSecret: customerSessionClientSecret || undefined,
               appearance: {
                 theme: 'stripe',
                 variables: {

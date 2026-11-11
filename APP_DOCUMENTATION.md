@@ -266,6 +266,7 @@ Function directories:
   rating, shipment operations, and tracking updates.
 - `shippo-rate`, `shippo-ops`, and `shippo-webhook` — Shippo rates, shipment
   operations, and webhooks.
+
 - `exchange-rates` and `sync-exchange-rates` — currency-rate retrieval and
   synchronization.
 - `send-email`, `send-contact-email`, `pickup-otp` — email/contact and pickup
@@ -274,6 +275,14 @@ Function directories:
   notification operations.
 - `reverse-geocode` — location lookup support.
 - `product-og` and `product-og-image` — product sharing metadata/image support.
+
+Stripe checkout uses a server-only `stripe_customers` mapping and a Stripe
+Customer Session to let signed-in buyers opt in to saving cards, select them at
+a later checkout, and remove them through the Payment Element. Card details
+remain with Stripe; the application stores only the Stripe customer reference.
+Apply the `20261111000000_stripe_customer_mapping.sql` migration and deploy
+`create-payment-intent` before deploying the client. This applies only to
+Stripe checkout, not the separate Revolut checkout.
 
 Browser-invoked Edge Functions use explicit CORS allowlists. Keep storefront
 origins in those lists (`https://www.bzead.uk`, `https://bzead.uk`,

@@ -1,25 +1,58 @@
-import { afterEach, describe, it, expect, vi } from 'vitest';
+import { beforeEach, describe, it, expect, vi } from 'vitest';
 import { createPaymentIntent, toStripeAmount, fromStripeAmount } from '../lib/stripeService';
 
-afterEach(() => {
-  vi.unstubAllGlobals();
+const mocks = vi.hoisted(() => ({
+  refreshSession: vi.fn(),
+  getSession: vi.fn(),
+  invoke: vi.fn(),
+}));
+
+vi.mock('../lib/supabase', () => ({
+  supabase: {
+    auth: { refreshSession: mocks.refreshSession, getSession: mocks.getSession },
+    functions: { invoke: mocks.invoke },
+  },
+}));
+
+beforeEach(() => {
+  vi.resetAllMocks();
+  mocks.refreshSession.mockResolvedValue({ data: { session: { access_token: 'token' } }, error: null });
+  mocks.invoke.mockResolvedValue({
+    data: { clientSecret: 'secret', paymentIntentId: 'pi_test', customerSessionClientSecret: 'session_secret' },
+    error: null,
+  });
 });
 
 describe('createPaymentIntent', () => {
-  it('forwards GBP payment requests to the configured payment endpoint', async () => {
-    const fetchMock = vi.fn().mockResolvedValue({
-      ok: true,
-      json: async () => ({ clientSecret: 'secret', paymentIntentId: 'pi_test' }),
-    });
-    vi.stubGlobal('fetch', fetchMock);
-
+  it('forwards GBP payment requests and returns the saved-card session', async () => {
     await expect(createPaymentIntent({ amount: 1000, currency: 'gbp' }))
-      .resolves.toEqual({ clientSecret: 'secret', paymentIntentId: 'pi_test' });
-    expect(fetchMock).toHaveBeenCalledOnce();
-    expect(fetchMock.mock.calls[0][1]).toMatchObject({
-      method: 'POST',
-      body: expect.stringContaining('"currency":"gbp"'),
+      .resolves.toEqual({ clientSecret: 'secret', paymentIntentId: 'pi_test', customerSessionClientSecret: 'session_secret' });
+    expect(mocks.invoke).toHaveBeenCalledWith('create-payment-intent', {
+      body: { amount: 1000, currency: 'gbp', client: 'web' },
+      headers: { Authorization: 'Bearer token' },
     });
+  });
+
+  it('rejects a response without a saved-card session', async () => {
+    mocks.invoke.mockResolvedValue({ data: { clientSecret: 'secret', paymentIntentId: 'pi_test' }, error: null });
+    await expect(createPaymentIntent({ amount: 1000, currency: 'gbp' }))
+      .rejects.toThrow('did not provide a saved-card session');
+  });
+
+  it('uses the existing session if refresh fails, and reports expired authentication', async () => {
+    mocks.refreshSession.mockResolvedValue({ data: { session: null }, error: new Error('refresh failed') });
+    mocks.getSession.mockResolvedValueOnce({ data: { session: { access_token: 'fallback' } } })
+      .mockResolvedValueOnce({ data: { session: null } });
+    await createPaymentIntent({ amount: 1000, currency: 'gbp' });
+    expect(mocks.invoke.mock.calls[0][1].headers.Authorization).toBe('Bearer fallback');
+    await expect(createPaymentIntent({ amount: 1000, currency: 'gbp' }))
+      .rejects.toThrow('Authentication expired');
+    expect(mocks.invoke).toHaveBeenCalledTimes(1);
+  });
+
+  it('surfaces payment initialization errors', async () => {
+    mocks.invoke.mockResolvedValue({ data: null, error: { message: 'Payment unavailable' } });
+    await expect(createPaymentIntent({ amount: 1000, currency: 'gbp' })).rejects.toThrow('Payment unavailable');
   });
 });
 
