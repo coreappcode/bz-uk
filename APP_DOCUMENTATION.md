@@ -136,8 +136,9 @@ The imported native Android project is in `android/`. Its UK application ID
 is `com.bzead.uk`, and its Firebase configuration includes that application.
 The existing Android backend client points to the shared Supabase project.
 The project is not yet a UK-ready storefront: its catalog pricing and currency
-display, saved addresses, shipping quotes, and order flow still implement the
-India market. Its Razorpay checkout is blocked for the UK application until a
+display, shipping quotes, and order flow still implement the India market.
+UK builds select and manage UK addresses without selecting overseas addresses.
+The India quote engine and Razorpay checkout are blocked for the UK application until a
 UK pricing and native Stripe payment flow is implemented and verified. Do not
 release it as a working UK shopping app based on its application ID alone.
 

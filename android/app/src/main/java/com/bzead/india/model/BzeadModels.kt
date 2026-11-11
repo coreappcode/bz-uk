@@ -1,6 +1,7 @@
 package com.bzead.india.model
 
 import com.bzead.india.data.Product
+import com.bzead.india.data.StorefrontMarket
 
 data class NotificationItem(
     val id: String,
@@ -50,7 +51,7 @@ data class DeliveryAddress(
     val addressType: String = "home", // "home", "work", "other"
     val isDefault: Boolean = false,
     val email: String = "",
-    val country: String = INDIA_COUNTRY_NAME,
+    val country: String = StorefrontMarket.countryName,
     val deliveryNotes: String = ""
 ) {
     val formatted: String

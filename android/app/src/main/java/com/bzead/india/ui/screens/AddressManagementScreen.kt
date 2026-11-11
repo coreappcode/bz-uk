@@ -61,6 +61,7 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.material3.HorizontalDivider
 import com.bzead.india.data.BzeadRepository
+import com.bzead.india.data.StorefrontMarket
 import com.bzead.india.model.DeliveryAddress
 import com.bzead.india.theme.BzeadHeaderNavy
 import com.bzead.india.util.AddressValidation
@@ -73,7 +74,8 @@ private val AddressMuted = Color(0xFF6B7280)
 @OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
 @Composable
 fun AddressManagementScreen(onNavigateBack: () -> Unit) {
-    val addresses by BzeadRepository.addresses.collectAsState()
+    val allAddresses by BzeadRepository.addresses.collectAsState()
+    val addresses = allAddresses.filter { StorefrontMarket.supportsCountry(it.country) }
     val isLoggedIn by BzeadRepository.isLoggedIn.collectAsState()
     val scope = rememberCoroutineScope()
     var isLoading by remember { mutableStateOf(true) }
@@ -116,7 +118,7 @@ fun AddressManagementScreen(onNavigateBack: () -> Unit) {
         pinCode = address?.pinCode.orEmpty()
         addressType = address?.addressType ?: "home"
         deliveryNotes = address?.deliveryNotes.orEmpty()
-        isDefault = address?.isDefault ?: addresses.isEmpty()
+        isDefault = address?.isDefault ?: allAddresses.isEmpty()
         fieldErrors = emptyMap()
         errorMessage = ""
         successMessage = ""
@@ -128,7 +130,7 @@ fun AddressManagementScreen(onNavigateBack: () -> Unit) {
         fullName = fullName,
         phoneNumber = phoneNumber,
         email = email,
-        country = DeliveryAddress.INDIA_COUNTRY_NAME,
+        country = editingAddress?.country ?: StorefrontMarket.countryName,
         streetAddress = streetAddress,
         streetAddress2 = streetAddress2,
         city = city,
@@ -204,13 +206,13 @@ fun AddressManagementScreen(onNavigateBack: () -> Unit) {
                         AddressInput("Full Name *", fullName, { fullName = it; fieldErrors = fieldErrors - "fullName" }, "fullName", fieldErrors)
                         AddressInput(
                             "Phone Number *", phoneNumber, { phoneNumber = it; fieldErrors = fieldErrors - "phoneNumber" }, "phoneNumber", fieldErrors,
-                            keyboardType = KeyboardType.Phone, placeholder = "+91 99999 99999"
+                            keyboardType = KeyboardType.Phone, placeholder = if (StorefrontMarket.isUk) "+44 7700 900000" else "+91 99999 99999"
                         )
                         AddressInput(
                             "Email Address *", email, { email = it; fieldErrors = fieldErrors - "email" }, "email", fieldErrors,
                             keyboardType = KeyboardType.Email, placeholder = "your@email.com"
                         )
-                        AddressInput("Country *", DeliveryAddress.INDIA_COUNTRY_NAME, {}, "country", fieldErrors, enabled = false)
+                        AddressInput("Country *", StorefrontMarket.countryName, {}, "country", fieldErrors, enabled = false)
                         AddressInput(
                             "Street Address Line 1 *", streetAddress, { streetAddress = it; fieldErrors = fieldErrors - "streetAddress1" }, "streetAddress1", fieldErrors,
                             placeholder = "Enter your street address"
@@ -229,7 +231,7 @@ fun AddressManagementScreen(onNavigateBack: () -> Unit) {
                         )
                         AddressInput(
                             "Postal / ZIP Code *", pinCode, { pinCode = it; fieldErrors = fieldErrors - "postalCode" }, "postalCode", fieldErrors,
-                            placeholder = "e.g., 110001"
+                            placeholder = if (StorefrontMarket.isUk) "e.g., SW1A 1AA" else "e.g., 110001"
                         )
 
                         Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {

@@ -1,6 +1,7 @@
 package com.bzead.india.util
 
 import com.bzead.india.model.DeliveryAddress
+import com.bzead.india.data.StorefrontMarket
 
 /** Address validation matching the web AddressForm and checkout-specific rules. */
 object AddressValidation {
@@ -21,7 +22,7 @@ object AddressValidation {
         required("city", a.city)
         required("state", a.state)
         required("postalCode", a.pinCode)
-        if (!a.isIndia) put("country", "BZEAD.IN shipping addresses must be in India.")
+        if (!StorefrontMarket.supportsCountry(a.country)) put("country", StorefrontMarket.countryError)
         if (a.email.isNotEmpty() && !EMAIL.matches(a.email)) {
             put("email", "Please enter a valid email address")
         }
@@ -32,7 +33,7 @@ object AddressValidation {
 
     fun validate(a: DeliveryAddress, checkout: Boolean): String? {
         if (!checkout) return fieldErrors(a).values.firstOrNull()
-        if (!a.isIndia) return "BZEAD.IN shipping addresses must be in India."
+        if (!StorefrontMarket.supportsCountry(a.country)) return StorefrontMarket.countryError
         if (a.fullName.isBlank()) return "Full name is required"
         if (a.phoneNumber.isBlank()) return "Phone number is required"
         if (a.phoneNumber.count { it.isDigit() } < 6) return "Phone number must have at least 6 digits"
@@ -41,7 +42,7 @@ object AddressValidation {
         if (a.city.isBlank()) return "City is required"
         if (a.state.isBlank()) return "State/Province is required"
         if (a.pinCode.isBlank()) return "Postal code is required"
-        if (!Regex("^\\d{6}$").matches(a.pinCode.trim())) return "Indian postal code must be exactly 6 digits"
+        if (!StorefrontMarket.isUk && !Regex("^\\d{6}$").matches(a.pinCode.trim())) return "Indian postal code must be exactly 6 digits"
         return null
     }
 }

@@ -343,6 +343,7 @@ internal object CheckoutApi {
         destinationPostalCode: String,
         token: String
     ): CheckoutQuote {
+        StorefrontMarket.requireSupportedCheckout()
         val cleaned = destinationCountry.trim()
         if (cleaned.isNotEmpty() && norm(cleaned) !in INDIA_TOKENS) {
             throw CheckoutException("BZEAD.IN checkout only supports delivery addresses in India.")

@@ -766,7 +766,8 @@ object BzeadRepository {
         val list = UserDataApi.fetchAddresses(token, uid) ?: return
         if (session?.userId != uid) return
         _addresses.value = list
-        selectedAddress.value = list.firstOrNull { it.isDefault } ?: list.firstOrNull()
+        val supported = list.filter { StorefrontMarket.supportsCountry(it.country) }
+        selectedAddress.value = supported.firstOrNull { it.isDefault } ?: supported.firstOrNull()
     }
 
     suspend fun refreshAddresses(): Boolean {
@@ -775,7 +776,8 @@ object BzeadRepository {
         val list = UserDataApi.fetchAddresses(token, uid) ?: return false
         if (session?.userId != uid) return false
         _addresses.value = list
-        selectedAddress.value = list.firstOrNull { it.isDefault } ?: list.firstOrNull()
+        val supported = list.filter { StorefrontMarket.supportsCountry(it.country) }
+        selectedAddress.value = supported.firstOrNull { it.isDefault } ?: supported.firstOrNull()
         return true
     }
 
@@ -809,7 +811,10 @@ object BzeadRepository {
         UserDataApi.deleteAddress(token, uid, id)?.let { return it }
         val wasSelected = selectedAddress.value?.id == id
         _addresses.value = _addresses.value.filter { it.id != id }
-        if (wasSelected) selectedAddress.value = _addresses.value.firstOrNull { it.isDefault } ?: _addresses.value.firstOrNull()
+        if (wasSelected) {
+            val supported = _addresses.value.filter { StorefrontMarket.supportsCountry(it.country) }
+            selectedAddress.value = supported.firstOrNull { it.isDefault } ?: supported.firstOrNull()
+        }
         return null
     }
 
@@ -1063,7 +1068,9 @@ object BzeadRepository {
         return chosen.ifEmpty { all }
     }
 
-    private fun activeAddress(): DeliveryAddress? = selectedAddress.value ?: _addresses.value.firstOrNull()
+    private fun activeAddress(): DeliveryAddress? =
+        selectedAddress.value?.takeIf { StorefrontMarket.supportsCountry(it.country) }
+            ?: _addresses.value.firstOrNull { StorefrontMarket.supportsCountry(it.country) }
 
     private suspend fun checkoutToken(): String =
         validToken() ?: throw CheckoutException("Authentication expired. Please log in again.")
@@ -1109,6 +1116,7 @@ object BzeadRepository {
 
     /** Web OrderSummary pricing effect: quote, package-weight check, serviceability, then delivery estimate. */
     suspend fun loadOrderSummary(): OrderSummaryData {
+        StorefrontMarket.requireSupportedCheckout()
         val token = checkoutToken()
         val address = activeAddress() ?: throw CheckoutException("Please add a delivery address before placing the order.")
         val base = buildCheckoutItems(token)
@@ -1145,6 +1153,7 @@ object BzeadRepository {
     /** Web ShippingAddress pricing effect: quotes the selected cart lines to the given destination. Returns an error message or null. */
     suspend fun quoteForAddress(country: String, pinCode: String): String? {
         return try {
+            StorefrontMarket.requireSupportedCheckout()
             val token = checkoutToken()
             val base = buildCheckoutItems(token)
             if (base.isNotEmpty()) CheckoutApi.calculateQuote(base, country, pinCode, token)

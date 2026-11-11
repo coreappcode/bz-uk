@@ -62,6 +62,7 @@ import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.bzead.india.data.BzeadRepository
+import com.bzead.india.data.StorefrontMarket
 import com.bzead.india.model.DeliveryAddress
 import com.bzead.india.theme.BzeadHeaderNavy
 import com.bzead.india.util.AddressValidation
@@ -83,7 +84,7 @@ fun ShippingAddressScreen(
     val profileName by BzeadRepository.userName.collectAsState()
     val profileEmail by BzeadRepository.userEmail.collectAsState()
     val profilePhone by BzeadRepository.userPhone.collectAsState()
-    val savedAddresses = allAddresses.filter { it.isIndia }
+    val savedAddresses = allAddresses.filter { StorefrontMarket.supportsCountry(it.country) }
     val scope = rememberCoroutineScope()
 
     var useExisting by remember { mutableStateOf(false) }
@@ -121,7 +122,7 @@ fun ShippingAddressScreen(
     LaunchedEffect(allAddresses) {
         if (!hydrated && allAddresses.isNotEmpty()) {
             hydrated = true
-            savedAddresses.firstOrNull { it.isDefault }?.let {
+            (savedAddresses.firstOrNull { it.isDefault } ?: savedAddresses.firstOrNull())?.let {
                 selectedId = it.id
                 useExisting = true
                 fillFrom(it)
@@ -144,7 +145,7 @@ fun ShippingAddressScreen(
         if (cartItems.isEmpty()) return@LaunchedEffect
         delay(250)
         pricingLoading = true
-        val err = BzeadRepository.quoteForAddress(DeliveryAddress.INDIA_COUNTRY_NAME, postalCode)
+        val err = BzeadRepository.quoteForAddress(StorefrontMarket.countryName, postalCode)
         if (err == null) {
             pricingOk = true
         } else {
@@ -166,7 +167,7 @@ fun ShippingAddressScreen(
             state = state.trim(),
             pinCode = postalCode.trim(),
             email = email.trim(),
-            country = DeliveryAddress.INDIA_COUNTRY_NAME,
+            country = StorefrontMarket.countryName,
             deliveryNotes = notes.trim()
         )
         AddressValidation.validate(address, checkout = true)?.let {
@@ -178,13 +179,17 @@ fun ShippingAddressScreen(
             return
         }
         if (!pricingOk) {
-            error = "Unable to calculate checkout prices and shipping. Please refresh and try again."
+            error = if (StorefrontMarket.isUk) {
+                "UK pricing and shipping are not available in the app yet. Please use the BZEAD UK website to place your order."
+            } else {
+                "Unable to calculate checkout prices and shipping. Please refresh and try again."
+            }
             return
         }
         isLoading = true
         scope.launch {
             if (!useExisting || selectedId == null) {
-                val err = BzeadRepository.addAddress(address.copy(isDefault = savedAddresses.isEmpty()))
+                val err = BzeadRepository.addAddress(address.copy(isDefault = allAddresses.isEmpty()))
                 if (err != null) {
                     error = "Unable to save shipping details right now. Please try again."
                     isLoading = false
@@ -386,7 +391,7 @@ fun ShippingAddressScreen(
                             ShipField(fullName, { fullName = it }, "John Doe")
                             Spacer(modifier = Modifier.height(16.dp))
                             ShipLabel("Phone Number", true)
-                            ShipField(phone, { phone = it }, "+1 (555) 123-4567", KeyboardType.Phone)
+                            ShipField(phone, { phone = it }, if (StorefrontMarket.isUk) "+44 7700 900000" else "+91 99999 99999", KeyboardType.Phone)
                             Spacer(modifier = Modifier.height(16.dp))
                             ShipLabel("Email", true)
                             ShipField(email, { email = it }, "john@example.com", KeyboardType.Email)
@@ -401,17 +406,17 @@ fun ShippingAddressScreen(
                             ShipField(street2, { street2 = it }, "Apt 4B")
                             Spacer(modifier = Modifier.height(16.dp))
                             ShipLabel("City", true)
-                            ShipField(city, { city = it }, "Mumbai")
+                            ShipField(city, { city = it }, if (StorefrontMarket.isUk) "London" else "Mumbai")
                             Spacer(modifier = Modifier.height(16.dp))
                             ShipLabel("State/Province", true)
-                            ShipField(state, { state = it }, "Maharashtra")
+                            ShipField(state, { state = it }, if (StorefrontMarket.isUk) "Greater London" else "Maharashtra")
                             Spacer(modifier = Modifier.height(16.dp))
-                            ShipLabel("PIN Code", true)
-                            ShipField(postalCode, { postalCode = it }, "560001")
+                            ShipLabel(if (StorefrontMarket.isUk) "Postal Code" else "PIN Code", true)
+                            ShipField(postalCode, { postalCode = it }, if (StorefrontMarket.isUk) "SW1A 1AA" else "560001")
                             Spacer(modifier = Modifier.height(16.dp))
                             ShipLabel("Country", true)
                             Text(
-                                text = DeliveryAddress.INDIA_COUNTRY_NAME,
+                                text = StorefrontMarket.countryName,
                                 fontSize = 16.sp,
                                 color = Color(0xFF6B7280),
                                 modifier = Modifier
