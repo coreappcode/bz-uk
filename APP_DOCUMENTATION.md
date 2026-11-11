@@ -135,6 +135,19 @@ configuration is not a substitute for backend authorization.
 The imported native Android project is in `android/`. Its UK application ID
 is `com.bzead.uk`, and its Firebase configuration includes that application.
 The existing Android backend client points to the shared Supabase project.
+The Android manifest registers verified product and share links for
+`www.bzead.uk` on HTTP and HTTPS. Product references use the web's approved,
+active product lookup; featured, hot-deals and trending section links open the
+corresponding native screens. Other paths captured under those prefixes, such
+as product reviews, open in the browser. Login and checkout URLs are not
+registered as app links. The apex `bzead.uk` host is not registered because
+its asset-links URL currently redirects instead of serving the file directly;
+register it only after that endpoint returns the JSON without a redirect.
+Before release, install the Play-signed UK app on devices covering the
+supported Android versions, verify the `www.bzead.uk` domain association in
+Android's App Links settings, and test cold and warm product and section links,
+review fallback, and login/checkout links. A debug-signed APK does not use the
+Play signing certificate and cannot establish the production association.
 The project is not yet a UK-ready storefront. UK catalog and cart prices use the
 UK public-price RPC and country exchange rates to display GBP; unavailable prices
 are not substituted with source-currency values. Shipping quotes and the order

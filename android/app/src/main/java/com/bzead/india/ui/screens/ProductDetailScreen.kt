@@ -207,7 +207,9 @@ fun ProductDetailScreen(
     }
 
     fun shareProduct() {
-        val url = "https://www.bzead.in/share/${ex.slug.ifEmpty { product.id }}"
+        val host = if (com.bzead.india.data.StorefrontMarket.isUk) "www.bzead.uk" else "www.bzead.in"
+        val url = android.net.Uri.Builder().scheme("https").authority(host)
+            .appendPath("share").appendPath(ex.slug.ifEmpty { product.id }).build().toString()
         val text = ex.shortDescription.take(100).trim()
         val message = if (text.isNotEmpty()) "$text\n\n$url" else url
         val send = Intent(Intent.ACTION_SEND).apply {

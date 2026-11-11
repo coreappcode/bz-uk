@@ -369,6 +369,28 @@ object SupabaseClient {
         withPublicPrices(listOf(parseProduct(row))).firstOrNull()
     }
 
+    internal suspend fun resolveAppLinkProduct(ref: String): String? {
+        val reference = ref.trim()
+        val column = when {
+            Regex("^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$", RegexOption.IGNORE_CASE).matches(reference) -> "id"
+            Regex("^BZD\\d{9}$", RegexOption.IGNORE_CASE).matches(reference) -> "public_product_id"
+            else -> "slug"
+        }
+        suspend fun lookup(target: String) = SupabaseRest.request(
+            "GET", "products?select=id&$target=eq.${SupabaseRest.enc(reference)}&approval_status=eq.approved&is_active=eq.true", ANON_KEY
+        )
+        var result = lookup(column)
+        val error = result.error.orEmpty()
+        if (!result.ok && column == "public_product_id" &&
+            error.contains("public_product_id", ignoreCase = true) && error.contains("does not exist", ignoreCase = true)
+        ) {
+            result = lookup("slug")
+        }
+        if (!result.ok) throw CheckoutException("Unable to load this product link. Please check your connection and try again.")
+        if (result.rows.length() > 1) throw CheckoutException("Unable to open this product link because it matches multiple products.")
+        return result.rows.optJSONObject(0)?.optString("id")?.takeIf { it.isNotBlank() }
+    }
+
     private data class CategoryRow(val id: String, val name: String, val parentId: String?, val level: Int)
 
     /** Web `fetchCategoriesFlat(true)`, paged by 1000 rows. */

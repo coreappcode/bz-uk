@@ -1,6 +1,8 @@
 package com.bzead.india
 
 import android.app.Activity
+import android.content.Intent
+import android.net.Uri
 import android.os.Bundle
 import android.widget.Toast
 import androidx.activity.ComponentActivity
@@ -34,6 +36,9 @@ import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalView
 import com.bzead.india.data.BzeadRepository
+import com.bzead.india.data.StorefrontAppLink
+import com.bzead.india.data.SupabaseClient
+import com.bzead.india.data.parseStorefrontAppLink
 import com.bzead.india.theme.BzeadHeaderNavy
 import com.bzead.india.ui.components.BottomTab
 import com.bzead.india.ui.components.BzeadBottomNav
@@ -171,6 +176,27 @@ private fun AppScreen.requiresBuyerAuth(): Boolean = when (this) {
 }
 
 class MainActivity : ComponentActivity(), com.razorpay.PaymentResultWithDataListener {
+    private data class AppLinkRequest(val uri: Uri, val sequence: Long)
+    private var appLinkRequest by mutableStateOf<AppLinkRequest?>(null)
+    private var appLinkSequence = 0L
+
+    private fun receiveAppLink(uri: Uri?) {
+        if (uri != null && parseStorefrontAppLink(uri) != null) {
+            appLinkRequest = AppLinkRequest(uri, ++appLinkSequence)
+        }
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        if (intent.action == Intent.ACTION_VIEW) receiveAppLink(intent.data)
+    }
+
+    override fun onSaveInstanceState(outState: Bundle) {
+        appLinkRequest?.let { outState.putString("pending_storefront_app_link", it.uri.toString()) }
+        super.onSaveInstanceState(outState)
+    }
+
     override fun onPaymentSuccess(razorpayPaymentId: String?, data: com.razorpay.PaymentData?) {
         com.bzead.india.data.RazorpayLauncher.onSuccess(data, razorpayPaymentId)
     }
@@ -181,6 +207,9 @@ class MainActivity : ComponentActivity(), com.razorpay.PaymentResultWithDataList
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        val restoredLink = savedInstanceState?.getString("pending_storefront_app_link")?.let(Uri::parse)
+        if (restoredLink != null) receiveAppLink(restoredLink)
+        else if (savedInstanceState == null && intent?.action == Intent.ACTION_VIEW) receiveAppLink(intent.data)
         try { com.razorpay.Checkout.preload(applicationContext) } catch (e: Exception) { e.printStackTrace() }
         com.bzead.india.data.BzeadRepository.init(applicationContext)
         com.bzead.india.data.BzeadFirebaseMessagingService.ensureChannel(applicationContext)
@@ -315,6 +344,44 @@ class MainActivity : ComponentActivity(), com.razorpay.PaymentResultWithDataList
                     }
                 }
 
+                val pendingAppLink = appLinkRequest
+                androidx.compose.runtime.LaunchedEffect(pendingAppLink) {
+                    if (pendingAppLink == null) return@LaunchedEffect
+                    if (currentScreen == AppScreen.Splash) navigateTo(AppScreen.Home)
+                    when (val route = parseStorefrontAppLink(pendingAppLink.uri)) {
+                        is StorefrontAppLink.Product -> {
+                            try {
+                                val productId = SupabaseClient.resolveAppLinkProduct(route.reference)
+                                if (productId == null) {
+                                    navigateTo(AppScreen.NotFound)
+                                } else {
+                                    pendingLoginDestination = null
+                                    navigateTo(AppScreen.ProductDetail(productId))
+                                }
+                            } catch (e: kotlinx.coroutines.CancellationException) {
+                                throw e
+                            } catch (e: com.bzead.india.data.CheckoutException) {
+                                snackbarHostState.showSnackbar(e.message ?: "Unable to load this product link.")
+                            }
+                        }
+                        is StorefrontAppLink.Section -> {
+                            pendingLoginDestination = null
+                            navigateTo(AppScreen.SectionProducts(route.name))
+                        }
+                        StorefrontAppLink.Browser -> {
+                            val browser = Intent.makeMainSelectorActivity(Intent.ACTION_MAIN, Intent.CATEGORY_APP_BROWSER)
+                                .setData(pendingAppLink.uri)
+                            try {
+                                startActivity(browser)
+                            } catch (e: android.content.ActivityNotFoundException) {
+                                snackbarHostState.showSnackbar("No browser is available to open this link.")
+                            }
+                        }
+                        null -> Unit
+                    }
+                    if (appLinkRequest == pendingAppLink) appLinkRequest = null
+                }
+
                 BackHandler(enabled = true) {
                     if (currentScreen == AppScreen.Home) {
                         val now = System.currentTimeMillis()
@@ -373,7 +440,7 @@ class MainActivity : ComponentActivity(), com.razorpay.PaymentResultWithDataList
                                 is AppScreen.Splash -> {
                                     SplashScreen(
                                         onSplashFinished = {
-                                            navigateTo(AppScreen.Home)
+                                            if (currentScreen == AppScreen.Splash) navigateTo(AppScreen.Home)
                                         }
                                     )
                                 }
