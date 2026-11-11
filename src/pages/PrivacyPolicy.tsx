@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import { Loader2 } from 'lucide-react';
 import { Header } from '../components/layout/Header';
 import { MobileNav } from '../components/layout/MobileNav';
@@ -196,6 +196,10 @@ export const PrivacyPolicy: React.FC = () => {
                 Requests can be made via Customer Support at{' '}
                 <a href="mailto:support@bzead.com" className="text-amber-600 hover:underline">support@bzead.com</a>.
                 We will respond to all legitimate requests within 30 days.
+              </p>
+              <p className="mt-2">
+                For account deletion instructions, see our{' '}
+                <Link to="/deleteaccount" className="text-amber-600 hover:underline">Delete Account Policy</Link>.
               </p>
             </section>
 

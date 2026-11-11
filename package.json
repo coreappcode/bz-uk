@@ -6,7 +6,7 @@
   "scripts": {
     "dev": "cross-env VITE_MARKET=GB vite",
     "build": "npm run build:buyer",
-    "build:buyer": "tsc -b && cross-env VITE_MARKET=GB vite build --outDir dist-buyer --emptyOutDir && node scripts/generate-share-pages.mjs --buyer",
+    "build:buyer": "tsc -b && cross-env VITE_MARKET=GB vite build --outDir dist-buyer --emptyOutDir && node scripts/generate-delete-account-page.mjs dist-buyer && node scripts/generate-share-pages.mjs --buyer",
     "build:share-pages": "node scripts/generate-share-pages.mjs",
     "generate:bulk-template": "node scripts/generate-bulk-product-template.mjs",
     "lint": "eslint .",

@@ -95,6 +95,7 @@ const ProductDetailsPage = lazyRetry(() => import('./pages/ProductDetailsPage'))
 const CategoryProducts = lazyRetry(() => import('./pages/CategoryProducts').then(m => ({ default: m.CategoryProducts })));
 const SectionProducts = lazyRetry(() => import('./pages/SectionProducts').then(m => ({ default: m.SectionProducts })));
 const PrivacyPolicy = lazyRetry(() => import('./pages/PrivacyPolicy'));
+const DeleteAccountPolicy = lazyRetry(() => import('./pages/DeleteAccountPolicy'));
 const TermsService = lazyRetry(() => import('./pages/TermsService'));
 const ShippingPolicy = lazyRetry(() => import('./pages/ShippingPolicy'));
 const RefundPolicy = lazyRetry(() => import('./pages/RefundPolicy'));
@@ -234,7 +235,7 @@ const RouteGuard: React.FC<{ children: React.ReactNode }> = ({ children }) => {
     const publicPages = [
       '/',
       '/privacy-policy', '/terms-of-service', '/shipping-policy',
-      '/refund-policy', '/terms-and-conditions', '/about', '/contact',
+      '/refund-policy', '/terms-and-conditions', '/deleteaccount', '/about', '/contact',
     ];
     const publicPrefixes = ['/products', '/category'];
     const isPublicPage =
@@ -253,6 +254,7 @@ const RouteGuard: React.FC<{ children: React.ReactNode }> = ({ children }) => {
     );
 
     if (authRole === 'admin' || authRole === 'seller') {
+      if (path === '/deleteaccount') return;
       if (isSellerPortalRedirect) return;
       if (path !== '/') {
         navigate('/', { replace: true });
@@ -343,6 +345,7 @@ function App() {
                   
                   {/* Legal Pages */}
                   <Route path="/privacy-policy" element={<PrivacyPolicy />} />
+                  <Route path="/deleteaccount" element={<DeleteAccountPolicy />} />
                   <Route path="/terms-of-service" element={<TermsService />} />
                   <Route path="/shipping-policy" element={<ShippingPolicy />} />
                   <Route path="/refund-policy" element={<RefundPolicy />} />

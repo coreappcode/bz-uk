@@ -80,6 +80,11 @@ const FooterImpl: React.FC = () => {
                 </button>
               </li>
               <li>
+                <Link to="/deleteaccount" className="text-white hover:text-amber-400 transition-colors text-sm">
+                  Delete Account Policy
+                </Link>
+              </li>
+              <li>
                 <button onClick={() => handleLegalNavigate('/terms-of-service')} disabled={legalLoadingPath !== null} className="text-white hover:text-amber-400 transition-colors text-sm disabled:opacity-60 flex items-center gap-2">
                   {legalLoadingPath === '/terms-of-service' && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
                   Terms of Service

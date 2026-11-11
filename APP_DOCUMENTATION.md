@@ -223,8 +223,12 @@ There is no separate route-folder hierarchy.
 | `/cart`, `/wishlist`, `/orders`, `/orders/:orderId` | Buyer shopping and order areas | Signed-in buyer |
 | `/checkout/shipping`, `/checkout/review`, `/checkout/payment`, `/checkout/confirmation` | Checkout journey | Signed-in buyer |
 | `/profile`, `/settings`, `/notifications`, `/user/addresses`, `/user/addresses/new`, `/user/addresses/:addressId/edit` | Buyer account and address management | Signed-in buyer |
-| `/privacy-policy`, `/terms-of-service`, `/shipping-policy`, `/refund-policy`, `/terms-and-conditions`, `/about`, `/contact` | Informational and legal pages | Public |
+| `/privacy-policy`, `/deleteaccount`, `/terms-of-service`, `/shipping-policy`, `/refund-policy`, `/terms-and-conditions`, `/about`, `/contact` | Informational and legal pages | Public |
 | `/seller`, `/seller/*` | External seller-portal redirect | Redirects to BZEAD.COM |
+
+The buyer build generates `deleteaccount/index.html` from the Vite app shell so
+the public account deletion policy can be opened directly as well as through
+client-side navigation. Confirm the direct URL and refresh behavior after deployment.
 
 The route guard permits public catalog and content routes, allows buyer routes
 for buyer accounts, and redirects signed-out users from protected buyer routes
