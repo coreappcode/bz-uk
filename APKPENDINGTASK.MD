@@ -22,13 +22,13 @@ and behavior. Do not change the working web checkout or other apps.
 - [x] Save the order recovery snapshot before payment, as the web app does.
 - [ ] Confirm payment and create or recover the paid order idempotently; clear
       purchased cart items only after the paid order is confirmed. The Android
-      recovery transaction is implemented but requires deployment and end-to-end
-      verification. Amount or stock mismatches require follow-up.
+      recovery transaction is deployed but requires end-to-end verification.
+      Amount or stock mismatches require follow-up.
 - [ ] Handle interrupted payments, app restarts, pending confirmations, and
       retries without asking the customer to pay twice.
-- [ ] Remove UK checkout guards only when the complete flow is ready; deploy
-      any required Android-specific backend functions without changing the web
-      payment function.
+- [ ] Enable UK checkout only when the complete flow is ready. The
+      Android-specific backend functions and recovery migration are deployed;
+      Android payment initialization is disabled by default on the server.
 - [ ] Verify the completed checkout, then build signed UK release AAB and APK
       files, verify their package and signatures, and make them downloadable.
 

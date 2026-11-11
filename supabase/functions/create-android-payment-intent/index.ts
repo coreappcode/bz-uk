@@ -12,6 +12,9 @@ Deno.serve(async (req: Request) => {
   if (!authorization?.startsWith("Bearer ")) return json({ error: "Authentication required" }, 401);
 
   try {
+    if (Deno.env.get("ANDROID_UK_CHECKOUT_ENABLED") !== "true") {
+      return json({ error: "Android UK payment initialization is not enabled." }, 503);
+    }
     const url = Deno.env.get("SUPABASE_URL");
     const serviceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
     const stripeKey = Deno.env.get("STRIPE_SECRET_KEY");

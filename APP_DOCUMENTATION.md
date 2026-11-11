@@ -170,7 +170,9 @@ release it as a working UK shopping app based on its application ID alone.
 The Android project includes a UK shipping rate-card/carrier adapter and Stripe
 PaymentSheet scaffolding. The UK quote is connected to address and review, but
 its shipping options and recovery requirements are not fully verified. The
-separate `create-android-payment-intent` function has not been deployed.
+separate Android payment and verification functions are deployed. Payment
+initialization additionally requires the server-side
+`ANDROID_UK_CHECKOUT_ENABLED=true` setting; it is disabled by default.
 Like the web payment function, it receives the freshly calculated client amount;
 neither is a server-authoritative quote. The Android payment guard remains in
 place until payment and order recovery are complete. The live web payment
@@ -184,8 +186,8 @@ The app retains the payment reference on failure and clears purchased cart
 items only after confirming the paid order. A mismatch or stock failure requires
 follow-up rather than marking an inconsistent order paid. This does not make
 the initial client-calculated quote authoritative. The Android functions and
-recovery migration have not been deployed, and the flow still requires
-end-to-end verification. If the webhook never runs, its email and Stripe fee
+recovery migration are deployed, but the flow still requires end-to-end
+verification. If the webhook never runs, its email and Stripe fee
 processing are not performed by this recovery path.
 The experimental UK quote groups shipments by seller and origin, and exposes
 configured standard, premium and express options. Its calculation is a
