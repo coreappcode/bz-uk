@@ -32,8 +32,8 @@ object SupabaseClient {
     private const val PRODUCT_FIELDS =
         "id,public_product_id,name,slug,description,price,mrp,discount_price,currency,image_url,images,seller_id,category,brand,stock,rating,review_count,is_featured,tags,item_condition,created_at"
 
-    /** Web storefront country (`INDIA_COUNTRY_NAME`), used for public product prices. */
-    const val STOREFRONT_COUNTRY = "India"
+    /** Country used by the public product pricing RPC. */
+    val STOREFRONT_COUNTRY: String get() = StorefrontMarket.countryName
 
     private fun JSONObject.text(key: String): String = if (isNull(key)) "" else optString(key)
 
@@ -165,7 +165,8 @@ object SupabaseClient {
             hasVariants = o.optBoolean("has_variants", false),
             offerSummary = firstActiveOfferSummary(o.optJSONArray("offer_rules")),
             specifications = emptyMap(),
-            createdAt = o.text("created_at")
+            createdAt = o.text("created_at"),
+            currency = o.text("currency").ifBlank { "INR" }.uppercase()
         )
     }
 
@@ -190,14 +191,41 @@ object SupabaseClient {
         val r = SupabaseRest.request("POST", path, ANON_KEY, body.toString())
         if (!r.ok) return null
         val row = r.rows.objects().firstOrNull { it.text("product_id") == productId } ?: return null
-        return Pair(row.optDouble("selling_price", 0.0), row.optDouble("markup_mrp", 0.0))
+        val selling = row.optDouble("selling_price", 0.0)
+        val markup = row.optDouble("markup_mrp", 0.0)
+        if (!StorefrontMarket.isUk) return Pair(selling, markup)
+        val product = SupabaseRest.request(
+            "GET", "products?select=currency&id=eq.${SupabaseRest.enc(productId)}&limit=1", ANON_KEY
+        )
+        if (!product.ok || product.rows.length() == 0) return null
+        val currency = product.rows.optJSONObject(0)?.optString("currency").orEmpty().ifBlank { "INR" }
+        val rates = if (currency.equals("GBP", ignoreCase = true)) emptyMap() else try {
+            MarketCurrency.loadRates(ANON_KEY)
+        } catch (e: CheckoutException) {
+            return null
+        }
+        val converted = MarketCurrency.toGbp(selling, currency, rates) ?: return null
+        return Pair(converted, MarketCurrency.toGbp(markup, currency, rates) ?: converted)
     }
 
     /** Applies the RPC prices the way the web cards do: strike-through MRP only when `markup_mrp > price`. */
     suspend fun withPublicPrices(products: List<Product>): List<Product> {
         val prices = fetchPublicPrices(products.map { it.id })
+        val rates = if (StorefrontMarket.isUk && products.any { !it.currency.equals("GBP", ignoreCase = true) }) {
+            try {
+                MarketCurrency.loadRates(ANON_KEY)
+            } catch (e: CheckoutException) {
+                emptyMap()
+            }
+        } else emptyMap()
         return products.map { p ->
-            val (selling, markup) = prices[p.id] ?: return@map p
+            val raw = prices[p.id]
+            if (StorefrontMarket.isUk && raw == null) {
+                return@map p.copy(price = Double.NaN, originalPrice = Double.NaN, mrp = Double.NaN, discountPercent = 0)
+            }
+            val (sourceSelling, sourceMarkup) = raw ?: return@map p
+            val selling = if (StorefrontMarket.isUk) MarketCurrency.toGbp(sourceSelling, p.currency, rates) ?: Double.NaN else sourceSelling
+            val markup = if (StorefrontMarket.isUk) MarketCurrency.toGbp(sourceMarkup, p.currency, rates) ?: selling else sourceMarkup
             val strike = if (markup > selling) markup else selling
             p.copy(
                 price = selling,

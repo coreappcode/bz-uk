@@ -1147,7 +1147,30 @@ object BzeadRepository {
                 selectedVariantId = it.selectedVariantId, selectedVariantSku = it.selectedVariantSku, productImage = it.product.imageUrl
             )
         }
-        return CheckoutApi.verifyCartPrices(items, "IN", token)
+        val result = CheckoutApi.verifyCartPrices(items, StorefrontMarket.countryName, token)
+        if (!StorefrontMarket.isUk || result.error != null) return result
+        val rates = if (cart.any { !it.product.currency.equals("GBP", ignoreCase = true) }) {
+            try {
+                MarketCurrency.loadRates(token)
+            } catch (e: CheckoutException) {
+                return CartPriceResult(emptyMap(), result.unavailable, emptyMap(), e.message)
+            }
+        } else emptyMap()
+        val variantPrices = mutableMapOf<String, Double>()
+        val publicPrices = mutableMapOf<String, Double>()
+        val unavailable = result.unavailable.toMutableMap()
+        for (item in cart) {
+            val source = item.product.currency
+            result.variantPrices[item.id]?.let { amount ->
+                val converted = MarketCurrency.toGbp(amount, source, rates)
+                if (converted == null) unavailable[item.id] = "GBP price unavailable. Please try again."
+                else variantPrices[item.id] = converted
+            }
+            result.publicPrices[item.product.id]?.let { amount ->
+                MarketCurrency.toGbp(amount, source, rates)?.let { publicPrices[item.product.id] = it }
+            }
+        }
+        return CartPriceResult(variantPrices, unavailable, publicPrices, null)
     }
 
     /** Web ShippingAddress pricing effect: quotes the selected cart lines to the given destination. Returns an error message or null. */

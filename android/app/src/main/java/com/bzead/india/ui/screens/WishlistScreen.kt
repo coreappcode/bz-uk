@@ -61,8 +61,6 @@ import com.bzead.india.theme.BzeadPrimary
 import com.bzead.india.theme.TextPrimary
 import com.bzead.india.theme.TextSecondary
 import kotlinx.coroutines.launch
-import java.text.NumberFormat
-import java.util.Locale
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -88,7 +86,6 @@ fun WishlistScreen(
     val products = wishlistProducts.filter { it.id in wishlistIds }
     val totalValue = products.sumOf { it.price }
     val totalSavings = products.sumOf { it.price * it.discountPercent.coerceAtLeast(0) / 100.0 }
-    val money = remember { NumberFormat.getCurrencyInstance(Locale("en", "IN")) }
 
     Column(
         modifier = modifier
@@ -150,8 +147,8 @@ fun WishlistScreen(
                 ) {
                     item {
                         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                            SummaryCard("Total Value", money.format(totalValue), Modifier.weight(1f), Color(0xFFD97706))
-                            SummaryCard("Total Savings", money.format(totalSavings), Modifier.weight(1f), Color(0xFF16A34A))
+                            SummaryCard("Total Value", com.bzead.india.ui.components.formatPrice(totalValue), Modifier.weight(1f), Color(0xFFD97706))
+                            SummaryCard("Total Savings", com.bzead.india.ui.components.formatPrice(totalSavings), Modifier.weight(1f), Color(0xFF16A34A))
                             SummaryCard("Items", products.size.toString(), Modifier.weight(1f), TextPrimary)
                         }
                     }
@@ -237,9 +234,9 @@ private fun WishlistProductCard(
                 Text(product.brand.ifBlank { "Brand" }, color = TextSecondary, fontSize = 12.sp)
                 Spacer(Modifier.height(6.dp))
                 Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                    Text("₹${product.price.toInt()}", color = Color(0xFFD97706), fontSize = 17.sp, fontWeight = FontWeight.Bold)
+                    Text(com.bzead.india.ui.components.formatPrice(product.price), color = Color(0xFFD97706), fontSize = 17.sp, fontWeight = FontWeight.Bold)
                     if (product.discountPercent > 0) {
-                        Text("₹${product.mrp.toInt()}", color = TextSecondary, fontSize = 11.sp)
+                        Text(com.bzead.india.ui.components.formatPrice(product.mrp), color = TextSecondary, fontSize = 11.sp)
                         Text("-${product.discountPercent}%", color = Color(0xFFDC2626), fontSize = 10.sp, fontWeight = FontWeight.Bold)
                     }
                 }

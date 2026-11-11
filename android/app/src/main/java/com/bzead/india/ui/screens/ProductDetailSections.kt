@@ -478,7 +478,7 @@ internal fun SimilarProductsSection(
                                 Text(item.brand.uppercase(), fontSize = 9.sp, fontWeight = FontWeight.Bold, color = Color(0xFF6B7280), maxLines = 1, overflow = TextOverflow.Ellipsis)
                                 Text(item.name, fontSize = 12.sp, fontWeight = FontWeight.SemiBold, color = Ink, maxLines = 1, overflow = TextOverflow.Ellipsis)
                                 Spacer(Modifier.height(4.dp))
-                                val p = prices[item.id] ?: item.price
+                                val p = prices[item.id] ?: if (com.bzead.india.data.StorefrontMarket.isUk) Double.NaN else item.price
                                 Text(formatPrice(p), fontSize = 13.sp, fontWeight = FontWeight.SemiBold, color = Ink)
                             }
                         }

@@ -147,10 +147,15 @@ fun CartScreen(
     val unavailableCount = unavailableItems.size
 
     fun unitPriceFor(item: CartItem): Double? =
-        if (hasVariantSelection(item)) variantPriceMap[item.id] else publicPriceMap[item.product.id] ?: item.product.price
+        if (hasVariantSelection(item)) variantPriceMap[item.id]
+        else publicPriceMap[item.product.id] ?: item.product.price.takeIf {
+            !com.bzead.india.data.StorefrontMarket.isUk && it.isFinite()
+        }
 
     val hasResolvedSelectedPrices = payableSelectedItems.all { unitPriceFor(it) != null } && variantPriceError == null
-    val displaySubtotal = payableSelectedItems.sumOf { item -> (unitPriceFor(item) ?: 0.0) * item.quantity }
+    val displaySubtotal = if (hasResolvedSelectedPrices) payableSelectedItems.sumOf { item ->
+        (unitPriceFor(item) ?: 0.0) * item.quantity
+    } else Double.NaN
     val isAllSelected = cartItems.isNotEmpty() && selectedItemIds.size == cartItems.size
 
     fun handleCheckout() {
@@ -579,7 +584,7 @@ fun CartItemRow(
                     modifier = Modifier.clickable { onProductClick() }
                 )
 
-                val displayPrice = unitPrice ?: cartItem.product.price
+                val displayPrice = unitPrice ?: if (com.bzead.india.data.StorefrontMarket.isUk) Double.NaN else cartItem.product.price
                 Row(
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(6.dp),

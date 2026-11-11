@@ -109,7 +109,8 @@ internal object UserDataApi {
             .put("selected_color", nullable(item.selectedColor))
             .put("selected_variant_id", if (isUuid(item.selectedVariantId)) item.selectedVariantId else JSONObject.NULL)
             .put("selected_variant_sku", nullable(item.selectedVariantSku))
-        item.variantPrice?.let { body.put("unit_price", it) }
+        // UK display prices are converted to GBP; the shared cart column stores source-currency prices.
+        if (!StorefrontMarket.isUk) item.variantPrice?.let { body.put("unit_price", it) }
         return SupabaseRest.request(
             "POST",
             "cart_items?on_conflict=user_id,product_id,selected_size,selected_color,selected_variant_sku",

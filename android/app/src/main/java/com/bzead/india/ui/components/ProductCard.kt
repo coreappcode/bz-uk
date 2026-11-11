@@ -158,14 +158,14 @@ fun ProductCard(
 
             Row(verticalAlignment = Alignment.Bottom, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                 Text(
-                    text = "₹${product.price.toInt()}",
+                    text = formatPrice(product.price),
                     fontSize = 15.sp,
                     fontWeight = FontWeight.ExtraBold,
                     color = TextPrimary
                 )
                 if (product.originalPrice > product.price) {
                     Text(
-                        text = "₹${product.originalPrice.toInt()}",
+                        text = formatPrice(product.originalPrice),
                         fontSize = 11.sp,
                         color = TextSecondary,
                         textDecoration = TextDecoration.LineThrough
@@ -177,6 +177,7 @@ fun ProductCard(
 
             Button(
                 onClick = onAddToCart,
+                enabled = !com.bzead.india.data.StorefrontMarket.isUk || product.price.isFinite(),
                 colors = ButtonDefaults.buttonColors(
                     containerColor = BzeadPrimary,
                     contentColor = Color.White

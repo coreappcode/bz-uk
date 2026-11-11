@@ -119,5 +119,6 @@ data class Product(
     val offerSummary: String? = null,
     val specifications: Map<String, String> = emptyMap(),
     val createdAt: String = "",
-    val productTypeId: String = ""
+    val productTypeId: String = "",
+    val currency: String = "INR"
 )

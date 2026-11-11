@@ -167,11 +167,20 @@ object ProductDetailApi {
         if (ids.isNotEmpty()) {
             val body = JSONObject().put("p_product_ids", JSONArray(ids)).put("p_country", SupabaseClient.STOREFRONT_COUNTRY)
             val pr = SupabaseRest.request("POST", "rpc/get_public_product_prices", anon, body.toString())
+            val rates = if (StorefrontMarket.isUk && similar.any { !it.currency.equals("GBP", true) }) {
+                try {
+                    MarketCurrency.loadRates(anon)
+                } catch (e: CheckoutException) {
+                    emptyMap()
+                }
+            } else emptyMap()
+            val currencies = similar.associate { it.id to it.currency }
             if (pr.ok) pr.rows.objs().forEach {
                 val pid = it.str("product_id")
-                val sp = it.num("selling_price")
+                val currency = currencies[pid].orEmpty()
+                val sp = if (StorefrontMarket.isUk) MarketCurrency.toGbp(it.num("selling_price"), currency, rates) ?: Double.NaN else it.num("selling_price")
                 if (pid.isNotEmpty() && sp > 0) prices[pid] = sp
-                val mm = it.num("markup_mrp")
+                val mm = if (StorefrontMarket.isUk) MarketCurrency.toGbp(it.num("markup_mrp"), currency, rates) ?: Double.NaN else it.num("markup_mrp")
                 if (pid.isNotEmpty() && mm > 0) mrps[pid] = mm
             }
         }

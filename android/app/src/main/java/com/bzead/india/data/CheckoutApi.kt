@@ -312,6 +312,9 @@ internal object CheckoutApi {
         val publicPrices = mutableMapOf<String, Double>()
         val body = JSONObject().put("p_product_ids", JSONArray(productIds)).put("p_country", country.ifBlank { JSONObject.NULL })
         val pr = SupabaseRest.request("POST", "rpc/get_public_product_prices", token, body.toString())
+        if (StorefrontMarket.isUk && !pr.ok) {
+            return CartPriceResult(emptyMap(), emptyMap(), emptyMap(), "Unable to verify product prices: ${pr.error}")
+        }
         if (pr.ok) {
             for (row in rows(pr)) {
                 val pid = str(row, "product_id")

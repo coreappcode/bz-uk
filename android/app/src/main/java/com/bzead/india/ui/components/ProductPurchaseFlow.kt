@@ -63,13 +63,15 @@ import com.bzead.india.data.Product
 import com.bzead.india.data.SupabaseClient
 import com.bzead.india.data.VariantSelection
 import com.bzead.india.model.ProductVariant
+import com.bzead.india.data.StorefrontMarket
 import kotlinx.coroutines.launch
 import java.text.NumberFormat
 import java.util.Locale
 
-/** Web `formatCurrency` for INR: en-IN grouping and exactly 2 decimals, e.g. ₹1,234.00. */
+/** Format prices in the active storefront's currency. */
 fun formatPrice(amount: Double): String {
-    val f = NumberFormat.getCurrencyInstance(Locale("en", "IN"))
+    if (!amount.isFinite()) return if (StorefrontMarket.isUk) "GBP price unavailable" else "Price unavailable"
+    val f = NumberFormat.getCurrencyInstance(if (StorefrontMarket.isUk) Locale.UK else Locale("en", "IN"))
     f.minimumFractionDigits = 2
     f.maximumFractionDigits = 2
     return f.format(amount)
@@ -126,6 +128,10 @@ class AddToCartFlow(
 
     private suspend fun addResolved(p: Product, quantity: Int, size: String?, color: String?, variant: ProductVariant?) {
         val resolved = resolvePrice(p, product.price, variant?.price)
+        if (StorefrontMarket.isUk && resolved.first == null) {
+            toast("GBP price unavailable. Please try again.")
+            return
+        }
         BzeadRepository.addToCart(
             p, size, color, variant?.id?.ifBlank { null }, variant?.sku?.ifBlank { null },
             resolved.first, quantity
@@ -136,6 +142,10 @@ class AddToCartFlow(
 
 /** Web `resolveVariantPrice`: public price (selling) and markup MRP; falls back to the card price / product MRP. */
 suspend fun resolvePrice(p: Product, fallbackPublic: Double?, variantPrice: Double?): Pair<Double?, Double?> {
+    if (StorefrontMarket.isUk) {
+        return SupabaseClient.fetchVariantPublicPrice(p.id, variantPrice?.takeIf { it > 0 })
+            ?.let { Pair(it.first, it.second) } ?: Pair(null, null)
+    }
     val fallback = fallbackPublic?.takeIf { it.isFinite() }
         ?: variantPrice?.takeIf { it.isFinite() && it > 0 }
         ?: p.price

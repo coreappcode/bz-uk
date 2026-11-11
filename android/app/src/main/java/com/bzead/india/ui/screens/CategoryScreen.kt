@@ -113,12 +113,13 @@ fun CategoryScreen(
     val categoryProducts by BzeadRepository.categoryProducts.collectAsState()
     val selectedProducts = categoryProducts[selectedSubcategoryId].orEmpty()
     val priceCeiling = remember(selectedProducts) {
-        (kotlin.math.ceil((selectedProducts.maxOfOrNull { it.price } ?: 200000.0) / 1000.0) * 1000.0)
+        (kotlin.math.ceil((selectedProducts.map { it.price }.filter { it.isFinite() }.maxOrNull() ?: 200000.0) / 1000.0) * 1000.0)
             .coerceAtLeast(1000.0).toFloat()
     }
     val displayedCategoryProducts = remember(selectedProducts, minimumRating, inStockOnly, minimumPrice, maximumPrice, sortBy) {
         val matching = selectedProducts.filter { product ->
-            product.price >= minimumPrice && product.price <= maximumPrice &&
+            ((!product.price.isFinite() && minimumPrice <= 0f && maximumPrice >= priceCeiling) ||
+                (product.price >= minimumPrice && product.price <= maximumPrice)) &&
                 (minimumRating == 0 || product.rating >= minimumRating) &&
                 (!inStockOnly || product.inStock)
         }
@@ -729,9 +730,9 @@ fun CategoryScreen(
             text = {
                 Column {
                     Text("Price", fontWeight = FontWeight.SemiBold)
-                    Text("Min: ₹${minimumPrice.toInt()}")
+                    Text("Min: ${com.bzead.india.ui.components.formatPrice(minimumPrice.toDouble())}")
                     Slider(value = minimumPrice, onValueChange = { minimumPrice = it.coerceAtMost(maximumPrice) }, valueRange = 0f..priceCeiling)
-                    Text("Max: ₹${maximumPrice.toInt()}")
+                    Text("Max: ${com.bzead.india.ui.components.formatPrice(maximumPrice.toDouble())}")
                     Slider(value = maximumPrice, onValueChange = { maximumPrice = it.coerceAtLeast(minimumPrice) }, valueRange = 0f..priceCeiling)
                     Text("Customer Review", fontWeight = FontWeight.SemiBold)
                     listOf(4, 3, 2, 1).forEach { rating ->
@@ -755,4 +756,3 @@ fun CategoryScreen(
         )
     }
 }
-

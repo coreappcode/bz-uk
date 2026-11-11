@@ -177,13 +177,14 @@ fun ProductDetailScreen(
     val effectiveStock = if (currentVariant != null) currentVariant.stock else product.stockCount
     val inStock = effectiveStock > 0
 
-    var rpcPrice by remember(product.id) { mutableStateOf<Pair<Double, Double>?>(null) }
+    var rpcPrice by remember(product.id, selectedSize, selectedColor, product.variants) { mutableStateOf<Pair<Double, Double>?>(null) }
     LaunchedEffect(product.id, selectedSize, selectedColor, product.variants) {
+        rpcPrice = null
         val override = VariantSelection.pricingVariant(product.variants, selectedSize, selectedColor)?.price
         SupabaseClient.fetchVariantPublicPrice(product.id, override)?.let { if (it.first > 0) rpcPrice = it }
     }
-    val publicUnitPrice = rpcPrice?.first ?: currentVariant?.price ?: product.price
-    val effectiveMrp = rpcPrice?.second?.takeIf { it > 0 } ?: product.mrp
+    val publicUnitPrice = rpcPrice?.first ?: if (com.bzead.india.data.StorefrontMarket.isUk) Double.NaN else currentVariant?.price ?: product.price
+    val effectiveMrp = rpcPrice?.second?.takeIf { it > 0 } ?: if (com.bzead.india.data.StorefrontMarket.isUk) Double.NaN else product.mrp
     val discountPercent = if (effectiveMrp > publicUnitPrice) Math.round((effectiveMrp - publicUnitPrice) / effectiveMrp * 100).toInt() else 0
     val gallery = remember(product, currentVariant, selectedColor) {
         VariantSelection.galleryImages(product, currentVariant, selectedColor)
@@ -192,7 +193,7 @@ fun ProductDetailScreen(
     }
     LaunchedEffect(selectedSize, selectedColor) { galleryIndex = 0 }
     val safeIndex = if (gallery.isEmpty()) 0 else galleryIndex.coerceIn(0, gallery.size - 1)
-    val canBuy = inStock && !adding && (!requiresSize || selectedSize.isNotEmpty()) && (!requiresColor || selectedColor.isNotEmpty())
+    val canBuy = inStock && !adding && publicUnitPrice.isFinite() && (!requiresSize || selectedSize.isNotEmpty()) && (!requiresColor || selectedColor.isNotEmpty())
 
     val averageRating = if (product.rating > 0f) product.rating.toDouble()
     else if (productReviews.isNotEmpty()) Math.round(productReviews.sumOf { it.rating.toDouble() } / productReviews.size * 10) / 10.0

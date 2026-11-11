@@ -94,7 +94,7 @@ fun SectionProductsScreen(
         sectionKey?.let(BzeadRepository::getProductsBySection).orEmpty()
     }
     val maxPrice = remember(allProducts) {
-        (kotlin.math.ceil((allProducts.maxOfOrNull { it.price } ?: 200000.0) / 1000.0) * 1000.0)
+        (kotlin.math.ceil((allProducts.map { it.price }.filter { it.isFinite() }.maxOrNull() ?: 200000.0) / 1000.0) * 1000.0)
             .coerceAtLeast(1000.0)
     }
     var minPrice by remember(sectionKey) { mutableStateOf(0f) }
@@ -119,7 +119,8 @@ fun SectionProductsScreen(
     }
     val filteredProducts = remember(allProducts, sortBy, minimumRating, inStockOnly, selectedCategory, minPrice, maxPriceFilter) {
         val filtered = allProducts.filter { product ->
-            product.price >= minPrice && product.price <= maxPriceFilter &&
+            ((!product.price.isFinite() && minPrice <= 0f && maxPriceFilter >= maxPrice) ||
+                (product.price >= minPrice && product.price <= maxPriceFilter)) &&
                 (minimumRating == 0 || product.rating >= minimumRating) &&
                 (!inStockOnly || product.inStock) &&
                 (selectedCategory == null || product.categoryId == selectedCategory)
@@ -258,9 +259,9 @@ fun SectionProductsScreen(
                         }
                     }
                     Text("Price Range", fontWeight = FontWeight.SemiBold)
-                    Text("Min: ₹${minPrice.toInt()}")
+                    Text("Min: ${com.bzead.india.ui.components.formatPrice(minPrice.toDouble())}")
                     Slider(value = minPrice, onValueChange = { minPrice = it.coerceAtMost(maxPriceFilter) }, valueRange = 0f..maxPrice.toFloat(), steps = 0)
-                    Text("Max: ₹${maxPriceFilter.toInt()}")
+                    Text("Max: ${com.bzead.india.ui.components.formatPrice(maxPriceFilter.toDouble())}")
                     Slider(value = maxPriceFilter, onValueChange = { maxPriceFilter = it.coerceAtLeast(minPrice) }, valueRange = 0f..maxPrice.toFloat(), steps = 0)
                     Text("Rating", fontWeight = FontWeight.SemiBold)
                     listOf(4, 3, 2, 1).forEach { rating ->
