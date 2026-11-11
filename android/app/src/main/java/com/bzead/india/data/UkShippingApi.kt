@@ -74,8 +74,7 @@ internal object UkShippingApi {
                 "G", "GM" -> weightKg * 1000
                 "LB" -> weightKg / 0.453592
                 "OZ" -> weightKg / 0.0283495
-                "KG", "" -> weightKg
-                else -> return@firstOrNull false
+                else -> weightKg
             }
             band.from.isFinite() && band.to.isFinite() && band.to > band.from &&
                 weight >= band.from && (weight < band.to || (index == bands.lastIndex && weight <= band.to))
@@ -113,9 +112,17 @@ internal object UkShippingApi {
         if (!amount.isFinite() || amount < 0) {
             throw CheckoutException("The shipping provider returned an invalid rate.")
         }
-        val provider = if (shippo) "shippo" else "shiprocket"
+        val provider = if (shippo) body.optString("provider").takeUnless { it.isBlank() || it == "null" } ?: "shippo"
+            else "shiprocket"
+        val tierCurrency = if (shippo && domestic) {
+            body.optJSONObject("tiers")?.optJSONObject("standard")?.optString("currency")
+                .orEmpty().trim().uppercase().ifEmpty { currency }
+        } else currency
+        fun text(row: JSONObject, key: String): String =
+            row.optString(key).trim().takeUnless { it == "null" }.orEmpty()
         val tiers = mutableMapOf<String, UkShippingTier>()
-        for (name in listOf("standard", "premium", "express")) {
+        val tierNames = if (shippo && domestic) listOf("standard", "express") else listOf("standard", "premium", "express")
+        for (name in tierNames) {
             val option = if (shippo) {
                 body.optJSONObject("tiers")?.optJSONObject(name)
             } else {
@@ -126,21 +133,21 @@ internal object UkShippingApi {
             val rate = option.optDouble("rate", Double.NaN)
             if (!rate.isFinite() || rate < 0) throw CheckoutException("The shipping provider returned an invalid rate.")
             val days = if (shippo) option.optInt("estimated_delivery_days").takeIf { it > 0 }?.toString().orEmpty()
-                else option.optString("estimatedDays")
+                else text(option, "estimatedDays")
             tiers[name] = UkShippingTier(
-                rate, currency, provider,
-                option.optString("courier_name").ifBlank { null },
-                option.optString("service_level").ifBlank { null },
-                option.optString("rate_id").ifBlank { null },
-                if (shippo && days.isNotBlank()) "$days days" else option.optString("etd"),
+                rate, tierCurrency, provider,
+                text(option, "courier_name").ifBlank { null },
+                text(option, "service_level").ifBlank { null },
+                text(option, "rate_id").ifBlank { null },
+                if (shippo && days.isNotBlank()) "$days days" else text(option, "etd"),
                 days
             )
         }
         return UkShippingRate(
             amount, currency, provider,
-            tier.optString("courier_name").ifBlank { null },
-            tier.optString("service_level").ifBlank { null },
-            tier.optString("rate_id").ifBlank { null },
+            text(tier, "courier_name").ifBlank { null },
+            text(tier, "service_level").ifBlank { null },
+            text(tier, "rate_id").ifBlank { null },
             if (shippo) null else body.optDouble("freeShippingAboveInr", Double.NaN)
                 .takeIf { it.isFinite() && it > 0 },
             tiers
@@ -188,12 +195,22 @@ internal object UkShippingApi {
                 throw CheckoutException("The shipping rate card contains an invalid amount.")
             }
             val express = band.expressAmount.takeIf { it.isFinite() && it > 0 } ?: band.amount
+            fun estimatedDays(value: String): String {
+                val range = Regex("(\\d+)\\s*(?:-|to)\\s*(\\d+)", RegexOption.IGNORE_CASE).find(value)
+                if (range != null) return "${range.groupValues[1]}-${range.groupValues[2]}"
+                return Regex("\\d+").find(value)?.value.orEmpty()
+            }
+            val expressEta = band.expressEta.ifBlank { band.standardEta }
             return UkShippingRate(band.amount, band.currency, "bzead-rate-card", tiers = mapOf(
-                "standard" to UkShippingTier(band.amount, band.currency, "bzead-rate-card", estimatedDelivery = band.standardEta),
-                "express" to UkShippingTier(express, band.currency, "bzead-rate-card", estimatedDelivery = band.expressEta.ifBlank { band.standardEta })
+                "standard" to UkShippingTier(band.amount, band.currency, "bzead-rate-card",
+                    estimatedDelivery = band.standardEta, estimatedDays = estimatedDays(band.standardEta)),
+                "express" to UkShippingTier(express, band.currency, "bzead-rate-card",
+                    estimatedDelivery = expressEta, estimatedDays = estimatedDays(expressEta))
             ))
         }
-        if (pickupPostcode.isBlank()) throw CheckoutException("The seller's pickup postcode is unavailable.")
+        if (pickupPostcode.isBlank() && originId == destinationId) {
+            throw CheckoutException("The seller's pickup postcode is unavailable.")
+        }
         val request = if (shippo) {
             JSONObject().put("from_country", originIso).put("from_zip", pickupPostcode)
                 .put("to_country", "GB").put("to_zip", destinationPostcode)

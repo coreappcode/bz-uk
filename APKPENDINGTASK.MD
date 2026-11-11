@@ -9,6 +9,9 @@ and behavior. Do not change the working web checkout or other apps.
       minimum-order rules, and stock checks.
 - [ ] Match web shipping rate cards, carrier rates, free-shipping rules,
       delivery options, estimates, and multi-seller or multi-origin orders.
+      The Android implementation has been compared with the web source and
+      adjusted, but carrier timing and fallback behavior still differ and
+      end-to-end parity has not been verified.
 - [ ] Carry the selected shipping option, carrier, service, rate ID, and
       delivery details into payment and the order recovery snapshot.
 - [ ] Connect Stripe PaymentSheet to payment initialization using the refreshed

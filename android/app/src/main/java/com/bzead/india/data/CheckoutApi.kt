@@ -399,6 +399,10 @@ internal object CheckoutApi {
         val postcodes = checked(get("seller_kyc?select=seller_id,business_postal_code&seller_id=${ids(sellers)}", token), "seller postcodes")
             .associate { str(it, "seller_id") to sanitizePostal(str(it, "business_postal_code")) }
         val countryById = countries.associateBy { str(it, "id") }
+        val countryByToken = countries.flatMap { country ->
+            tokenSet(str(country, "country_name"), str(country, "country_code"),
+                str(country, "short_code"), str(country, "iso2")).map { it to country }
+        }.toMap()
         val nonVariantIds = items.indices.filter { !variants.containsKey(it) }.map { items[it].productId }.distinct()
         val productPrices = mutableMapOf<String, Double>()
         if (nonVariantIds.isNotEmpty()) {
@@ -420,7 +424,9 @@ internal object CheckoutApi {
             val product = productRows[item.productId]
                 ?: throw CheckoutException("\"${item.productName}\" is no longer available.")
             val seller = str(product, "seller_id")
-            val originId = str(product, "origin_country_id").ifBlank { profiles[seller].orEmpty() }
+            val originId = str(product, "origin_country_id").ifBlank { profiles[seller].orEmpty() }.ifBlank {
+                countryByToken[norm(str(product, "origin_country"))]?.let { str(it, "id") }.orEmpty()
+            }
             val country = countryById[originId] ?: throw CheckoutException("Product origin is unavailable.")
             val originIso = str(country, "iso2").ifBlank { str(country, "country_code") }.uppercase()
             val currency = str(product, "currency").trim().uppercase()
@@ -452,17 +458,16 @@ internal object CheckoutApi {
                     freeQuantity = floor(finiteNum(it, "get_quantity")).toInt()
                 )
             }
-            UkCheckoutLine(seller, originId, originIso, postcodes[seller].orEmpty(), item.quantity, price, currency, parcel, activeOffers)
+            val shippoOrigin = providerRows.any {
+                str(it, "country_code").equals(originIso, true) &&
+                    str(it, "provider").equals("shippo", true) &&
+                    it.optBoolean(if (originId == ukId) "domestic" else "international")
+            }
+            UkCheckoutLine(seller, originId, originIso, postcodes[seller].orEmpty(), item.quantity, price, currency, parcel, activeOffers, shippoOrigin)
         }
         val amounts = UkCheckoutCalculator.calculate(lines, rates) { group ->
             val first = group.first()
-            val domestic = first.originId == ukId
-            val shippo = providerRows.any {
-                str(it, "country_code").equals(first.originIso, true) &&
-                    str(it, "provider").equals("shippo", true) &&
-                    it.optBoolean(if (domestic) "domestic" else "international")
-            }
-            UkShippingApi.quote(first.originId, first.originIso, ukId, first.pickupPostcode, postcode, shippo, group.map { it.parcel }, token)
+            UkShippingApi.quote(first.originId, first.originIso, ukId, first.pickupPostcode, postcode, first.shippoOrigin, group.map { it.parcel }, token)
         }
         val minimum = rules.firstNotNullOfOrNull { rule ->
             val origin = norm(str(rule, "origin_iso2"))

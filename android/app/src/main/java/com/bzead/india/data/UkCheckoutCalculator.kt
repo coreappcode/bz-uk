@@ -21,7 +21,8 @@ internal data class UkCheckoutLine(
     val unitPrice: Double,
     val currency: String,
     val parcel: UkParcel,
-    val offers: List<UkCheckoutOffer> = emptyList()
+    val offers: List<UkCheckoutOffer> = emptyList(),
+    val shippoOrigin: Boolean = false
 )
 
 internal data class UkCheckoutAmounts(
@@ -125,7 +126,7 @@ internal object UkCheckoutCalculator {
         val singleShipment = shippingGroups.singleOrNull()?.second
         val internationalGroups = shippingGroups.filter { it.first[0].originIso.trim().uppercase() != "GB" }
         val tierShipment = if (internationalGroups.isNotEmpty()) {
-            internationalGroups.firstOrNull { it.second.provider == "shiprocket" }
+            internationalGroups.firstOrNull { !it.first[0].shippoOrigin }
                 ?: internationalGroups.firstOrNull()
         } else shippingGroups.firstOrNull()
         val availableTiers = tierShipment?.second?.tiers.orEmpty()
