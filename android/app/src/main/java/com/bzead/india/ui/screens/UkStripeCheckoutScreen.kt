@@ -43,6 +43,7 @@ internal fun UkStripeCheckoutScreen(onBack: () -> Unit, onOrderPlaced: (String) 
 
     fun checkPayment(payment: BzeadRepository.PendingStripePayment) {
         checking = true
+        canCancel = false
         scope.launch {
             try {
                 val orderId = BzeadRepository.confirmStripeOrder(payment)

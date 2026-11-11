@@ -177,13 +177,16 @@ place until payment and order recovery are complete. The live web payment
 function is unchanged.
 The separate Android Stripe status verification function checks the authenticated
 buyer and Stripe payment status, and can cancel an uncompleted intent before
-retry. It has not been deployed and does not validate the checkout quote. Its
-comparison with the app's prepared amount is a consistency check, not an
-authoritative quote. The app persists a pending payment reference locally and
-uses the saved server snapshot to retry order creation after verified payment;
-the order RPC leaves payment pending, so the existing Stripe webhook is still
-needed to mark the order paid. This recovery flow still requires end-to-end
-verification.
+retry. The Android recovery action verifies a fully captured Stripe payment,
+then invokes a service-role-only transaction to recover the snapshot, validate
+order ownership, currency and amount, and mark the order paid idempotently.
+The app retains the payment reference on failure and clears purchased cart
+items only after confirming the paid order. A mismatch or stock failure requires
+follow-up rather than marking an inconsistent order paid. This does not make
+the initial client-calculated quote authoritative. The Android functions and
+recovery migration have not been deployed, and the flow still requires
+end-to-end verification. If the webhook never runs, its email and Stripe fee
+processing are not performed by this recovery path.
 The experimental UK quote uses the standard international Shippo tier and
 calculates available delivery tiers using the web's standard-rate delta approach.
 Multi-shipment tier selection and fulfillment details still need parity

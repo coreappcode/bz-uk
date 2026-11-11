@@ -68,6 +68,7 @@ Deno.serve(async (req: Request) => {
       metadata: {
         user_id: user.id,
         source: "bzeadstore",
+        client: "android_uk",
         item_count: String(body.metadata?.item_count || ""),
       },
     });

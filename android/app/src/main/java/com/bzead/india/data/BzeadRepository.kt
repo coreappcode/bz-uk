@@ -1321,6 +1321,7 @@ object BzeadRepository {
             expectedDeliveryDays = deliveryDays
         )
             .put("p_currency", "GBP")
+            .put("p_payment_method", "card")
             .put("p_idempotency_key", "stripe_${payment.paymentIntentId}")
             .put("p_shipping_provider", details?.provider ?: JSONObject.NULL)
             .put("p_shipping_carrier", details?.carrier ?: JSONObject.NULL)
@@ -1333,23 +1334,18 @@ object BzeadRepository {
     internal suspend fun confirmStripeOrder(prepared: PendingStripePayment): String? {
         if (session?.userId != prepared.userId) throw CheckoutException("Please sign in to confirm your payment.")
         val deadline = System.currentTimeMillis() + 30_000
-        var verified = false
-        var creationAttempts = 0
         while (System.currentTimeMillis() < deadline) {
-            if (!verified) {
-                when (StripePaymentApi.verifyPayment(checkoutToken(), prepared.paymentIntentId, prepared.total)) {
-                    StripePaymentApi.PaymentStatus.SUCCEEDED -> verified = true
-                    StripePaymentApi.PaymentStatus.FAILED -> {
-                        throw StripePaymentNotCompleted()
-                    }
-                    StripePaymentApi.PaymentStatus.PENDING -> {
-                        kotlinx.coroutines.delay(1500)
-                        continue
-                    }
+            val recovery = StripePaymentApi.recoverPayment(checkoutToken(), prepared.paymentIntentId, prepared.total)
+            when (recovery.status) {
+                StripePaymentApi.PaymentStatus.SUCCEEDED -> Unit
+                StripePaymentApi.PaymentStatus.FAILED -> throw StripePaymentNotCompleted()
+                StripePaymentApi.PaymentStatus.PENDING -> {
+                    kotlinx.coroutines.delay(1500)
+                    continue
                 }
             }
-            val order = CheckoutApi.waitForOrder(checkoutToken(), prepared.paymentIntentId, 1_000, 1_500)
-            if (order != null && order.second.lowercase() in setOf("completed", "succeeded", "paid")) {
+            val orderId = recovery.orderId
+            if (orderId != null) {
                 val purchased = _cartItems.value.filter { prepared.purchasedCartQuantities[it.id] == it.quantity }
                 for (item in purchased) {
                     if (UserDataApi.isUuid(item.product.id)) {
@@ -1364,15 +1360,7 @@ object BzeadRepository {
                 checkoutSelectedIds.value = emptySet()
                 loadOrders(prepared.userId)
                 forgetStripePayment(prepared)
-                return order.first
-            }
-            if (creationAttempts < 3) {
-                creationAttempts++
-                try {
-                    CheckoutApi.createPaidOrderFromSnapshot(checkoutToken(), prepared.userId, prepared.paymentIntentId)
-                } catch (e: CheckoutException) {
-                    android.util.Log.w("BzeadCheckout", "Paid order creation is pending: ${e.message}")
-                }
+                return orderId
             }
             kotlinx.coroutines.delay(1500)
         }

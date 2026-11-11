@@ -1017,26 +1017,6 @@ internal object CheckoutApi {
         return r.ok
     }
 
-    suspend fun createPaidOrderFromSnapshot(token: String, userId: String, paymentIntentId: String): String {
-        val snapshot = get(
-            "checkout_payment_snapshots?select=rpc_params&user_id=eq.${SupabaseRest.enc(userId)}" +
-                "&payment_intent_id=eq.${SupabaseRest.enc(paymentIntentId)}&limit=1",
-            token
-        )
-        if (!snapshot.ok) throw CheckoutException("Unable to load payment recovery details. Please check your orders.")
-        val params = rows(snapshot).singleOrNull()?.optJSONObject("rpc_params")
-            ?: throw CheckoutException("Payment recovery details are unavailable. Please contact support.")
-        if (str(params, "p_user_id") != userId || str(params, "p_payment_intent_id") != paymentIntentId ||
-            !str(params, "p_currency").equals("GBP", ignoreCase = true) ||
-            str(params, "p_idempotency_key") != "stripe_$paymentIntentId"
-        ) throw CheckoutException("Payment recovery details do not match this order. Please contact support.")
-        params.put("p_payment_method", "card").put("p_payment_status", "completed").put("p_order_status", "processing")
-        val result = SupabaseRest.request("POST", "rpc/create_order_secure", token, params.toString())
-        if (!result.ok) throw CheckoutException("Unable to confirm the paid order. Please check your orders before paying again.")
-        return rows(result).firstOrNull()?.let { str(it, "id") }?.takeIf { it.isNotBlank() }
-            ?: throw CheckoutException("Order confirmation is pending. Please check your orders before paying again.")
-    }
-
     /** Polls `orders` by `payment_intent_id` (web `waitForRecoveredOrder`). Returns (id, payment_status). */
     suspend fun waitForOrder(token: String, paymentIntentId: String, timeoutMs: Long, intervalMs: Long): Pair<String, String>? {
         val started = System.currentTimeMillis()

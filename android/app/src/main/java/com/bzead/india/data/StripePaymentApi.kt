@@ -13,6 +13,8 @@ internal data class StripePaymentSession(
 internal object StripePaymentApi {
     enum class PaymentStatus { SUCCEEDED, PENDING, FAILED }
 
+    data class RecoveryResult(val status: PaymentStatus, val orderId: String?)
+
     fun parsePaymentStatus(body: JSONObject): PaymentStatus = when (body.optString("status")) {
         "succeeded" -> PaymentStatus.SUCCEEDED
         "pending" -> PaymentStatus.PENDING
@@ -20,13 +22,28 @@ internal object StripePaymentApi {
         else -> throw CheckoutException("The payment verification response is invalid.")
     }
 
-    suspend fun verifyPayment(token: String, paymentIntentId: String, totalGbp: Double): PaymentStatus {
-        val result = SupabaseRest.callFunction(
-            "verify-android-stripe-payment", token,
-            JSONObject().put("paymentIntentId", paymentIntentId).put("expectedAmount", amountInPence(totalGbp))
-        )
-        if (!result.ok) throw CheckoutException("Unable to verify payment. Please check your orders before paying again.")
-        return parsePaymentStatus(result.json() ?: throw CheckoutException("The payment verification response is invalid."))
+    suspend fun recoverPayment(token: String, paymentIntentId: String, totalGbp: Double): RecoveryResult {
+        repeat(3) { attempt ->
+            val result = SupabaseRest.callFunction(
+                "verify-android-stripe-payment", token,
+                JSONObject().put("paymentIntentId", paymentIntentId).put("expectedAmount", amountInPence(totalGbp))
+                    .put("action", "recover")
+            )
+            if (result.ok) {
+                val body = result.json() ?: throw CheckoutException("The payment verification response is invalid.")
+                val status = parsePaymentStatus(body)
+                val orderId = body.optString("orderId").trim().takeIf { it.isNotBlank() && it != "null" }
+                if (status == PaymentStatus.SUCCEEDED && orderId == null) {
+                    throw CheckoutException("Payment received, but order confirmation is pending. Do not pay again.")
+                }
+                return RecoveryResult(status, orderId)
+            }
+            if (result.code != -1 && result.code < 500) {
+                throw CheckoutException("Unable to verify payment. Please check your orders before paying again.")
+            }
+            if (attempt < 2) kotlinx.coroutines.delay(1500)
+        }
+        throw CheckoutException("Payment confirmation is pending. Do not pay again.")
     }
 
     suspend fun cancelUncompletedPayment(token: String, paymentIntentId: String, totalGbp: Double) {

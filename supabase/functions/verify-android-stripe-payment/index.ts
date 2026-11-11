@@ -48,11 +48,11 @@ Deno.serve(async (req: Request) => {
     }
 
     const action = typeof body === "object" && body !== null && "action" in body ? body.action : "verify";
-    if (action !== "verify" && action !== "cancel") return json({ error: "Invalid action" }, 400);
+    if (action !== "verify" && action !== "cancel" && action !== "recover") return json({ error: "Invalid action" }, 400);
     const stripe = new Stripe(stripeKey, { httpClient: Stripe.createFetchHttpClient() });
     let payment = await stripe.paymentIntents.retrieve(paymentIntentId);
     let result = verifyPayment(payment, user.id, paymentIntentId, /^(sk|rk)_live_/.test(stripeKey), expectedAmount);
-    if (result === "mismatch") {
+    if (result === "mismatch" || payment.metadata.client !== "android_uk") {
       console.error("[verify-android-stripe-payment] Payment does not match authenticated UK checkout");
       return json({ error: "Payment could not be verified" }, 403);
     }
@@ -64,6 +64,30 @@ Deno.serve(async (req: Request) => {
       if (payment.status !== "canceled" || result !== "failed") {
         return json({ error: "Payment cannot be cancelled. Check its status before paying again." }, 409);
       }
+    }
+    if (action === "recover" && result === "succeeded") {
+      const recovery = await fetch(`${url}/rest/v1/rpc/confirm_android_stripe_order`, {
+        method: "POST",
+        headers: {
+          apikey: serviceKey,
+          Authorization: `Bearer ${serviceKey}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          p_user_id: user.id,
+          p_payment_intent_id: paymentIntentId,
+          p_amount_pence: payment.amount_received,
+        }),
+      });
+      if (!recovery.ok) {
+        console.error("[verify-android-stripe-payment] Paid order recovery failed:", recovery.status, await recovery.text());
+        return json({ error: "Payment received, but order confirmation is pending. Do not pay again." }, 502);
+      }
+      const order = await recovery.json() as { id?: unknown };
+      if (typeof order.id !== "string" || !order.id) {
+        throw new Error("Order recovery returned no order ID");
+      }
+      return json({ status: result, orderId: order.id }, 200);
     }
     return json({ status: result }, 200);
   } catch (error) {
