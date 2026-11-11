@@ -10,7 +10,7 @@ internal sealed interface StorefrontAppLink {
 
 internal fun parseStorefrontAppLink(uri: Uri): StorefrontAppLink? {
     if (uri.scheme != "https" && uri.scheme != "http") return null
-    if (uri.host != "www.bzead.uk" || uri.userInfo != null || uri.port != -1) return null
+    if (uri.host !in setOf("www.bzead.uk", "bzead.uk") || uri.userInfo != null || uri.port != -1) return null
     val encodedPath = uri.encodedPath ?: return null
     if (!encodedPath.startsWith("/products/") && !encodedPath.startsWith("/share/")) return null
     if (encodedPath.contains("//")) return StorefrontAppLink.Browser
