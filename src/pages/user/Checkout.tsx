@@ -582,10 +582,13 @@ const CheckoutForm: React.FC<
   const [billingAddress, setBillingAddress] = useState<ShippingAddr>({ ...shippingAddress });
   const [sameAsShipping, setSameAsShipping] = useState(true);
 
-  // The web checkout accepts cards only; wallet buttons are not offered.
+  const [useStripeLink, setUseStripeLink] = useState(false);
   const paymentElementOptions: StripePaymentElementOptions = {
     layout: 'tabs',
-    wallets: { applePay: 'never', googlePay: 'never', link: 'never' },
+    wallets: { applePay: 'never', googlePay: 'never', link: useStripeLink ? 'auto' : 'never' },
+    ...(useStripeLink && customerEmail
+      ? { defaultValues: { billingDetails: { email: customerEmail } } }
+      : {}),
   };
 
   // COD vs Stripe toggle
@@ -1580,7 +1583,22 @@ const CheckoutForm: React.FC<
             </div>
           </div>
 
+          <label className="flex cursor-pointer items-center gap-2 text-sm font-medium text-slate-800">
+            <input
+              type="checkbox"
+              checked={useStripeLink}
+              disabled={isLoading}
+              onChange={(event) => {
+                setPaymentElementReady(false);
+                setUseStripeLink(event.target.checked);
+              }}
+              className="h-5 w-5 accent-[#6D28D9]"
+            />
+            Use Stripe Link for previously saved cards
+          </label>
+
           <PaymentElement
+            key={useStripeLink ? 'link-on' : 'link-off'}
             options={paymentElementOptions}
             onReady={() => setPaymentElementReady(true)}
             onLoadError={({ error: loadError }) => {
