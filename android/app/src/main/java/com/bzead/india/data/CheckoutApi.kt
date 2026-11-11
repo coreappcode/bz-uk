@@ -50,6 +50,14 @@ data class CheckoutShippingDetails(
     val rateId: String?
 )
 
+data class CheckoutShippingOption(
+    val shipping: Double,
+    val total: Double,
+    val details: CheckoutShippingDetails,
+    val estimatedDelivery: String,
+    val estimatedDays: String
+)
+
 /** Result of the web `calculateDestinationCheckoutPricing` for an India destination (INR). */
 data class CheckoutQuote(
     val subtotal: Double,
@@ -64,7 +72,8 @@ data class CheckoutQuote(
     val variantIds: List<String?>,
     val variantSkus: List<String?>,
     val minimumOrder: MinimumOrderConstraint?,
-    val shippingDetails: CheckoutShippingDetails? = null
+    val shippingDetails: CheckoutShippingDetails? = null,
+    val shippingOptions: Map<String, CheckoutShippingOption> = emptyMap()
 )
 
 data class RazorpayOrder(val orderId: String, val keyId: String, val amount: Long, val currency: String)
@@ -467,7 +476,8 @@ internal object CheckoutApi {
         return CheckoutQuote(
             amounts.subtotal, amounts.discount, amounts.shipping, amounts.total,
             amounts.shipping, 0.0, amounts.unitPrices, variantIds, variantSkus, minimum,
-            amounts.singleShipment?.let { CheckoutShippingDetails(it.provider, it.carrier, it.service, it.rateId) }
+            amounts.singleShipment?.let { CheckoutShippingDetails(it.provider, it.carrier, it.service, it.rateId) },
+            amounts.shippingOptions
         )
     }
 

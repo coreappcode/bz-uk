@@ -183,8 +183,9 @@ buyer and the Stripe payment status; it has not been deployed and does not
 validate the checkout quote or replace order recovery. Its comparison with the
 app's prepared amount is a consistency check, not an authoritative quote.
 The experimental UK quote uses the standard international Shippo tier and
-preserves carrier metadata for a single shipment. Multiple shipments still need
-complete tier selection and fulfillment metadata before checkout can be enabled.
+calculates available delivery tiers using the web's standard-rate delta approach.
+Multi-shipment tier selection and fulfillment details still need parity
+verification before checkout can be enabled.
 
 ### Market selection
 

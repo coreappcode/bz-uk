@@ -26,7 +26,19 @@ internal data class UkShippingRate(
     val carrier: String? = null,
     val service: String? = null,
     val rateId: String? = null,
-    val freeShippingAboveInr: Double? = null
+    val freeShippingAboveInr: Double? = null,
+    val tiers: Map<String, UkShippingTier> = emptyMap()
+)
+
+internal data class UkShippingTier(
+    val amount: Double,
+    val currency: String,
+    val provider: String,
+    val carrier: String? = null,
+    val service: String? = null,
+    val rateId: String? = null,
+    val estimatedDelivery: String = "",
+    val estimatedDays: String = ""
 )
 
 internal data class UkRateBand(
@@ -34,7 +46,10 @@ internal data class UkRateBand(
     val from: Double,
     val to: Double,
     val amount: Double,
-    val currency: String
+    val currency: String,
+    val expressAmount: Double = Double.NaN,
+    val standardEta: String = "",
+    val expressEta: String = ""
 )
 
 internal object UkShippingApi {
@@ -98,13 +113,37 @@ internal object UkShippingApi {
         if (!amount.isFinite() || amount < 0) {
             throw CheckoutException("The shipping provider returned an invalid rate.")
         }
+        val provider = if (shippo) "shippo" else "shiprocket"
+        val tiers = mutableMapOf<String, UkShippingTier>()
+        for (name in listOf("standard", "premium", "express")) {
+            val option = if (shippo) {
+                body.optJSONObject("tiers")?.optJSONObject(name)
+            } else {
+                val options = body.optJSONArray("tiers")
+                (0 until (options?.length() ?: 0)).mapNotNull { options?.optJSONObject(it) }
+                    .firstOrNull { it.optString("tier") == name }
+            } ?: continue
+            val rate = option.optDouble("rate", Double.NaN)
+            if (!rate.isFinite() || rate < 0) throw CheckoutException("The shipping provider returned an invalid rate.")
+            val days = if (shippo) option.optInt("estimated_delivery_days").takeIf { it > 0 }?.toString().orEmpty()
+                else option.optString("estimatedDays")
+            tiers[name] = UkShippingTier(
+                rate, currency, provider,
+                option.optString("courier_name").ifBlank { null },
+                option.optString("service_level").ifBlank { null },
+                option.optString("rate_id").ifBlank { null },
+                if (shippo && days.isNotBlank()) "$days days" else option.optString("etd"),
+                days
+            )
+        }
         return UkShippingRate(
-            amount, currency, if (shippo) "shippo" else "shiprocket",
+            amount, currency, provider,
             tier.optString("courier_name").ifBlank { null },
             tier.optString("service_level").ifBlank { null },
             tier.optString("rate_id").ifBlank { null },
             if (shippo) null else body.optDouble("freeShippingAboveInr", Double.NaN)
-                .takeIf { it.isFinite() && it > 0 }
+                .takeIf { it.isFinite() && it > 0 },
+            tiers
         )
     }
 
@@ -124,7 +163,7 @@ internal object UkShippingApi {
         val shipment = metrics(parcels)
         val response = SupabaseRest.request(
             "GET",
-            "product_origin_destination_shipping_rates?select=weight_band_unit,weight_band_from,weight_band_to,currency_code,standard_shipping_amount" +
+            "product_origin_destination_shipping_rates?select=weight_band_unit,weight_band_from,weight_band_to,currency_code,standard_shipping_amount,express_shipping_amount,standard_est_delivery_date,express_est_delivery_date" +
                 "&product_origin_country_id=eq.${SupabaseRest.enc(originId)}&destination_country_id=eq.${SupabaseRest.enc(destinationId)}&order=weight_band_from.asc",
             token
         )
@@ -136,7 +175,10 @@ internal object UkShippingApi {
                     row.optDouble("weight_band_from", Double.NaN),
                     row.optDouble("weight_band_to", Double.NaN),
                     row.optDouble("standard_shipping_amount", Double.NaN),
-                    row.optString("currency_code").trim().uppercase()
+                    row.optString("currency_code").trim().uppercase(),
+                    row.optDouble("express_shipping_amount", Double.NaN),
+                    row.optString("standard_est_delivery_date").takeUnless { it == "null" }.orEmpty(),
+                    row.optString("express_est_delivery_date").takeUnless { it == "null" }.orEmpty()
                 )
             }
         }
@@ -145,7 +187,11 @@ internal object UkShippingApi {
             if (!band.amount.isFinite() || band.amount < 0 || band.currency.isBlank()) {
                 throw CheckoutException("The shipping rate card contains an invalid amount.")
             }
-            return UkShippingRate(band.amount, band.currency, "bzead-rate-card")
+            val express = band.expressAmount.takeIf { it.isFinite() && it > 0 } ?: band.amount
+            return UkShippingRate(band.amount, band.currency, "bzead-rate-card", tiers = mapOf(
+                "standard" to UkShippingTier(band.amount, band.currency, "bzead-rate-card", estimatedDelivery = band.standardEta),
+                "express" to UkShippingTier(express, band.currency, "bzead-rate-card", estimatedDelivery = band.expressEta.ifBlank { band.standardEta })
+            ))
         }
         if (pickupPostcode.isBlank()) throw CheckoutException("The seller's pickup postcode is unavailable.")
         val request = if (shippo) {

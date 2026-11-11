@@ -52,6 +52,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil.compose.AsyncImage
 import com.bzead.india.data.BzeadRepository
+import com.bzead.india.data.StorefrontMarket
 import com.bzead.india.theme.BzeadHeaderNavy
 import com.bzead.india.ui.components.formatPrice
 import kotlinx.coroutines.CancellationException
@@ -78,8 +79,10 @@ fun OrderSummaryScreen(
     var loadError by remember { mutableStateOf<String?>(null) }
     var proceedError by remember { mutableStateOf<String?>(null) }
     var proceeding by remember { mutableStateOf(false) }
+    var selectedShippingTier by remember { mutableStateOf("standard") }
 
     LaunchedEffect(cartItems, selectedAddress) {
+        selectedShippingTier = "standard"
         loading = true
         loadError = null
         try {
@@ -96,6 +99,9 @@ fun OrderSummaryScreen(
 
     val summary = data
     val quote = summary?.quote
+    val selectedOption = quote?.shippingOptions?.get(selectedShippingTier)
+    val displayedShipping = selectedOption?.shipping ?: quote?.shipping
+    val displayedTotal = selectedOption?.total ?: quote?.total
     val minimumNotMet = quote?.minimumOrder?.let { !it.isMet } == true
     val notServiceable = summary != null && !summary.serviceable
     val ready = summary != null && !loading && loadError == null && !notServiceable && quote != null && quote.total > 0
@@ -118,7 +124,10 @@ fun OrderSummaryScreen(
                 scope.launch {
                     try {
                         val stockError = BzeadRepository.recheckStock(d.items)
-                        if (stockError != null) proceedError = stockError else onProceedToPayment()
+                        if (stockError != null) proceedError = stockError else {
+                            if (StorefrontMarket.isUk) BzeadRepository.selectUkShippingTier(selectedShippingTier)
+                            onProceedToPayment()
+                        }
                     } catch (e: CancellationException) {
                         throw e
                     } catch (e: Exception) {
@@ -180,7 +189,23 @@ fun OrderSummaryScreen(
                 Text("Review Items & Delivery", fontSize = 16.sp, fontWeight = FontWeight.Bold, color = Color(0xFF0F1111))
                 Spacer(Modifier.height(10.dp))
 
-                val eta = summary?.estimatedDeliveryDate
+                if (StorefrontMarket.isUk && !quote?.shippingOptions.isNullOrEmpty()) {
+                    for (tier in listOf("standard", "premium", "express")) {
+                        val option = quote?.shippingOptions?.get(tier) ?: continue
+                        Row(
+                            modifier = Modifier.fillMaxWidth().clickable { selectedShippingTier = tier }.padding(vertical = 8.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            androidx.compose.material3.RadioButton(selected = tier == selectedShippingTier, onClick = { selectedShippingTier = tier })
+                            Column(Modifier.weight(1f)) {
+                                Text(tier.replaceFirstChar { it.uppercase() }, fontWeight = FontWeight.SemiBold)
+                                if (option.estimatedDelivery.isNotBlank()) Text(option.estimatedDelivery, fontSize = 12.sp)
+                            }
+                            Text(if (option.shipping == 0.0) "FREE" else formatPrice(option.shipping))
+                        }
+                    }
+                }
+                val eta = selectedOption?.estimatedDelivery?.ifBlank { null } ?: summary?.estimatedDeliveryDate
                 Row(
                     modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(6.dp)).background(Color(0xFFF0FAF0))
                         .border(1.dp, Color(0xFFC3E6CB), RoundedCornerShape(6.dp)).padding(10.dp),
@@ -257,10 +282,10 @@ fun OrderSummaryScreen(
                     when {
                         notServiceable -> "Not a Serviceable Area"
                         quote == null -> "Calculating..."
-                        quote.shipping <= 0.0 -> "FREE"
-                        else -> formatPrice(quote.shipping)
+                        displayedShipping != null && displayedShipping <= 0.0 -> "FREE"
+                        else -> formatPrice(displayedShipping ?: quote.shipping)
                     },
-                    valueColor = if (quote != null && !notServiceable && quote.shipping <= 0.0) Color(0xFF067D62) else Color(0xFF0F1111)
+                    valueColor = if (displayedShipping != null && !notServiceable && displayedShipping <= 0.0) Color(0xFF067D62) else Color(0xFF0F1111)
                 )
                 SummaryLine("Cash on Delivery", "Not Available")
 
@@ -298,7 +323,7 @@ fun OrderSummaryScreen(
                     Divider(thickness = 2.dp, color = Color(0xFFDDDDDD))
                     Row(modifier = Modifier.fillMaxWidth().padding(vertical = 12.dp), horizontalArrangement = Arrangement.SpaceBetween) {
                         Text("Order Total", fontSize = 18.sp, fontWeight = FontWeight.Bold, color = OsPrice)
-                        Text(if (quote != null) formatPrice(quote.total) else "—", fontSize = 18.sp, fontWeight = FontWeight.Bold, color = OsPrice)
+                        Text(if (displayedTotal != null) formatPrice(displayedTotal) else "—", fontSize = 18.sp, fontWeight = FontWeight.Bold, color = OsPrice)
                     }
                 }
 

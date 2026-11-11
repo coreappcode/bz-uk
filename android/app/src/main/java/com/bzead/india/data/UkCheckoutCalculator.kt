@@ -31,7 +31,8 @@ internal data class UkCheckoutAmounts(
     val total: Double,
     val unitPrices: List<Double>,
     val inrSubtotalByOrigin: Map<String, Double>,
-    val singleShipment: UkShippingRate?
+    val singleShipment: UkShippingRate?,
+    val shippingOptions: Map<String, CheckoutShippingOption>
 )
 
 internal object UkCheckoutCalculator {
@@ -121,9 +122,28 @@ internal object UkCheckoutCalculator {
         shipping = round(shipping)
         val total = round(subtotal - discount + shipping)
         if (!total.isFinite() || total <= 0) throw CheckoutException("Invalid checkout total.")
+        val singleShipment = shippingGroups.singleOrNull()?.second
+        val internationalGroups = shippingGroups.filter { it.first[0].originIso.trim().uppercase() != "GB" }
+        val tierShipment = if (internationalGroups.isNotEmpty()) {
+            internationalGroups.firstOrNull { it.second.provider == "shiprocket" }
+                ?: internationalGroups.firstOrNull()
+        } else shippingGroups.firstOrNull()
+        val availableTiers = tierShipment?.second?.tiers.orEmpty()
+        val standard = availableTiers["standard"]
+        val shippingOptions = if (standard != null) availableTiers.mapValues { (_, tier) ->
+            val difference = tier.amount - standard.amount
+            val delta = convert(kotlin.math.abs(difference), tier.currency, "GBP") * if (difference < 0) -1 else 1
+            val optionShipping = round(shipping + delta)
+            if (optionShipping < 0) throw CheckoutException("Invalid shipping option.")
+            CheckoutShippingOption(
+                optionShipping, round(subtotal - discount + optionShipping),
+                CheckoutShippingDetails(tier.provider, tier.carrier, tier.service, tier.rateId),
+                tier.estimatedDelivery, tier.estimatedDays
+            )
+        } else emptyMap()
         return UkCheckoutAmounts(
             subtotal, discount, shipping, total, unitPrices, subtotalByOrigin,
-            shippingGroups.singleOrNull()?.second
+            singleShipment, shippingOptions
         )
     }
 }

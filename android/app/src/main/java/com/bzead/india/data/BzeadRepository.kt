@@ -1114,6 +1114,13 @@ object BzeadRepository {
         val estimatedDeliveryDate: String?
     )
 
+    private var selectedUkShippingTier = "standard"
+
+    fun selectUkShippingTier(tier: String) {
+        if (tier !in setOf("standard", "premium", "express")) throw CheckoutException("Invalid delivery option.")
+        selectedUkShippingTier = tier
+    }
+
     /** Web OrderSummary pricing effect: quote, package-weight check, serviceability, then delivery estimate. */
     suspend fun loadOrderSummary(): OrderSummaryData {
         StorefrontMarket.requireSupportedCheckout()
@@ -1225,7 +1232,14 @@ object BzeadRepository {
             .put("full_name", address.fullName)
             .put("phone", address.phoneNumber)
         val productMeta = CheckoutApi.fetchProductMeta(summary.items.map { it.productId }, token)
-        val payment = StripePaymentApi.createSession(token, summary.quote.total, summary.items.size)
+        val selectedOption = summary.quote.shippingOptions[selectedUkShippingTier]
+        if (selectedUkShippingTier != "standard" && selectedOption == null) {
+            throw CheckoutException("The selected delivery option is no longer available. Return to review and choose another option.")
+        }
+        val shippingAmount = selectedOption?.shipping ?: summary.quote.shipping
+        val total = selectedOption?.total ?: summary.quote.total
+        val details = selectedOption?.details ?: summary.quote.shippingDetails
+        val payment = StripePaymentApi.createSession(token, total, summary.items.size)
         val params = CheckoutApi.buildRpcParams(
             customerId = uid,
             items = summary.items,
@@ -1235,7 +1249,7 @@ object BzeadRepository {
             customerPhone = address.phoneNumber,
             notes = address.deliveryNotes,
             paymentIntentId = payment.paymentIntentId,
-            shippingAmount = summary.quote.shipping,
+            shippingAmount = shippingAmount,
             actualShippingCost = summary.quote.actualShippingCost,
             platformShippingMargin = summary.quote.platformShippingMargin,
             expectedDeliveryDate = summary.estimatedDeliveryDate,
@@ -1244,12 +1258,12 @@ object BzeadRepository {
             .put("p_currency", "GBP")
             .put("p_idempotency_key", "stripe_${payment.paymentIntentId}")
             .put("p_payment_method", "stripe")
-            .put("p_shipping_provider", summary.quote.shippingDetails?.provider ?: JSONObject.NULL)
-            .put("p_shipping_carrier", summary.quote.shippingDetails?.carrier ?: JSONObject.NULL)
-            .put("p_shipping_service_level", summary.quote.shippingDetails?.service ?: JSONObject.NULL)
-            .put("p_shipping_rate_id", summary.quote.shippingDetails?.rateId ?: JSONObject.NULL)
+            .put("p_shipping_provider", details?.provider ?: JSONObject.NULL)
+            .put("p_shipping_carrier", details?.carrier ?: JSONObject.NULL)
+            .put("p_shipping_service_level", details?.service ?: JSONObject.NULL)
+            .put("p_shipping_rate_id", details?.rateId ?: JSONObject.NULL)
         StripePaymentApi.saveRecoverySnapshot(token, uid, payment, params)
-        return PreparedStripePayment(payment, summary.quote.total, uid, summary.items.map { it.cartItemId }.toSet())
+        return PreparedStripePayment(payment, total, uid, summary.items.map { it.cartItemId }.toSet())
     }
 
     internal suspend fun confirmStripeOrder(prepared: PreparedStripePayment): String? {
