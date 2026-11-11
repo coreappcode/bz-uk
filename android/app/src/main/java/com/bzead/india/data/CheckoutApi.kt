@@ -491,7 +491,10 @@ internal object CheckoutApi {
         destinationPostalCode: String,
         token: String
     ): CheckoutQuote {
-        StorefrontMarket.requireSupportedCheckout()
+        if (StorefrontMarket.isUk) {
+            if (!StorefrontMarket.supportsCountry(destinationCountry)) throw CheckoutException(StorefrontMarket.countryError)
+            return calculateUkQuote(items, destinationPostalCode, token)
+        }
         val cleaned = destinationCountry.trim()
         if (cleaned.isNotEmpty() && norm(cleaned) !in INDIA_TOKENS) {
             throw CheckoutException("BZEAD.IN checkout only supports delivery addresses in India.")
@@ -821,7 +824,7 @@ internal object CheckoutApi {
         val productIds = items.map { it.productId }.distinct()
         val r = get("products?select=id,stock,name&id=${ids(productIds)}", token)
         if (!r.ok) {
-            return if (r.code == -1) "Could not verify stock availability. Please try again." else null
+            return if (StorefrontMarket.isUk || r.code == -1) "Could not verify stock availability. Please try again." else null
         }
         val byId = rows(r).associateBy { str(it, "id") }
         val short = mutableListOf<String>()
@@ -838,7 +841,10 @@ internal object CheckoutApi {
     /** Products missing a package weight (web OrderSummary "Missing package weight" check). */
     suspend fun productsMissingWeight(productIds: List<String>, token: String): List<String> {
         val r = get("products?select=id,name,package_weight&id=${ids(productIds.distinct())}", token)
-        if (!r.ok) return emptyList()
+        if (!r.ok) {
+            if (StorefrontMarket.isUk) throw CheckoutException("Could not verify product package weights. Please try again.")
+            return emptyList()
+        }
         return rows(r).filter { finiteNum(it, "package_weight") <= 0 }.map { str(it, "name") }
     }
 
@@ -1011,6 +1017,26 @@ internal object CheckoutApi {
         return r.ok
     }
 
+    suspend fun createPaidOrderFromSnapshot(token: String, userId: String, paymentIntentId: String): String {
+        val snapshot = get(
+            "checkout_payment_snapshots?select=rpc_params&user_id=eq.${SupabaseRest.enc(userId)}" +
+                "&payment_intent_id=eq.${SupabaseRest.enc(paymentIntentId)}&limit=1",
+            token
+        )
+        if (!snapshot.ok) throw CheckoutException("Unable to load payment recovery details. Please check your orders.")
+        val params = rows(snapshot).singleOrNull()?.optJSONObject("rpc_params")
+            ?: throw CheckoutException("Payment recovery details are unavailable. Please contact support.")
+        if (str(params, "p_user_id") != userId || str(params, "p_payment_intent_id") != paymentIntentId ||
+            !str(params, "p_currency").equals("GBP", ignoreCase = true) ||
+            str(params, "p_idempotency_key") != "stripe_$paymentIntentId"
+        ) throw CheckoutException("Payment recovery details do not match this order. Please contact support.")
+        params.put("p_payment_method", "card").put("p_payment_status", "completed").put("p_order_status", "processing")
+        val result = SupabaseRest.request("POST", "rpc/create_order_secure", token, params.toString())
+        if (!result.ok) throw CheckoutException("Unable to confirm the paid order. Please check your orders before paying again.")
+        return rows(result).firstOrNull()?.let { str(it, "id") }?.takeIf { it.isNotBlank() }
+            ?: throw CheckoutException("Order confirmation is pending. Please check your orders before paying again.")
+    }
+
     /** Polls `orders` by `payment_intent_id` (web `waitForRecoveredOrder`). Returns (id, payment_status). */
     suspend fun waitForOrder(token: String, paymentIntentId: String, timeoutMs: Long, intervalMs: Long): Pair<String, String>? {
         val started = System.currentTimeMillis()
@@ -1021,6 +1047,8 @@ internal object CheckoutApi {
             )
             if (r.ok) {
                 rows(r).firstOrNull()?.let { return str(it, "id") to str(it, "payment_status") }
+            } else if (StorefrontMarket.isUk) {
+                throw CheckoutException("Unable to check order confirmation. Please try again.")
             }
             kotlinx.coroutines.delay(intervalMs)
         }

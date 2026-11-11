@@ -143,11 +143,13 @@ fun ShippingAddressScreen(
     // Web: debounced checkout pricing refresh when the postal code or cart changes.
     LaunchedEffect(postalCode, cartItems) {
         if (cartItems.isEmpty()) return@LaunchedEffect
-        delay(250)
         pricingLoading = true
+        pricingOk = false
+        delay(250)
         val err = BzeadRepository.quoteForAddress(StorefrontMarket.countryName, postalCode)
         if (err == null) {
             pricingOk = true
+            error = ""
         } else {
             error = err
             pricingOk = false
@@ -179,11 +181,7 @@ fun ShippingAddressScreen(
             return
         }
         if (!pricingOk) {
-            error = if (StorefrontMarket.isUk) {
-                "UK pricing and shipping are not available in the app yet. Please use the BZEAD UK website to place your order."
-            } else {
-                "Unable to calculate checkout prices and shipping. Please refresh and try again."
-            }
+            if (error.isBlank()) error = "Unable to calculate checkout prices and shipping. Please refresh and try again."
             return
         }
         isLoading = true

@@ -47,12 +47,23 @@ Deno.serve(async (req: Request) => {
       return json({ error: "Invalid payment amount" }, 400);
     }
 
+    const action = typeof body === "object" && body !== null && "action" in body ? body.action : "verify";
+    if (action !== "verify" && action !== "cancel") return json({ error: "Invalid action" }, 400);
     const stripe = new Stripe(stripeKey, { httpClient: Stripe.createFetchHttpClient() });
-    const payment = await stripe.paymentIntents.retrieve(paymentIntentId);
-    const result = verifyPayment(payment, user.id, paymentIntentId, /^(sk|rk)_live_/.test(stripeKey), expectedAmount);
+    let payment = await stripe.paymentIntents.retrieve(paymentIntentId);
+    let result = verifyPayment(payment, user.id, paymentIntentId, /^(sk|rk)_live_/.test(stripeKey), expectedAmount);
     if (result === "mismatch") {
       console.error("[verify-android-stripe-payment] Payment does not match authenticated UK checkout");
       return json({ error: "Payment could not be verified" }, 403);
+    }
+    if (action === "cancel") {
+      if (payment.status === "requires_payment_method") {
+        payment = await stripe.paymentIntents.cancel(paymentIntentId);
+        result = verifyPayment(payment, user.id, paymentIntentId, /^(sk|rk)_live_/.test(stripeKey), expectedAmount);
+      }
+      if (payment.status !== "canceled" || result !== "failed") {
+        return json({ error: "Payment cannot be cancelled. Check its status before paying again." }, 409);
+      }
     }
     return json({ status: result }, 200);
   } catch (error) {

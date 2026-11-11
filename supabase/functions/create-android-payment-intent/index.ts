@@ -2,9 +2,6 @@ import Stripe from "https://esm.sh/stripe@20.0.0?target=deno";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { getOrCreateStripeCustomer, mobileSavedCardSessionParams } from "../create-payment-intent/customer.ts";
 
-// Do not accept client-supplied totals until an authoritative UK quote is available.
-const hasAuthoritativeQuote = () => false;
-
 Deno.serve(async (req: Request) => {
   const json = (body: Record<string, unknown>, status = 200) =>
     new Response(JSON.stringify(body), { status, headers: { "Content-Type": "application/json" } });
@@ -35,7 +32,6 @@ Deno.serve(async (req: Request) => {
       return json({ error: "Invalid payment amount" }, 400);
     }
     if (body.currency !== "gbp") return json({ error: "Only GBP payments are supported" }, 400);
-    if (!hasAuthoritativeQuote()) return json({ error: "UK checkout is not available yet" }, 503);
 
     const stripe = new Stripe(stripeKey, { httpClient: Stripe.createFetchHttpClient() });
     const db = createClient(url, serviceKey);

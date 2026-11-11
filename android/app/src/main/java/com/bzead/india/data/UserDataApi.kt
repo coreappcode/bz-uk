@@ -133,6 +133,17 @@ internal object UserDataApi {
             token
         )
 
+    suspend fun deletePurchasedCartItem(token: String, userId: String, item: CartItem, quantity: Int): RestResult =
+        SupabaseRest.request(
+            "DELETE",
+            "cart_items?user_id=eq.$userId&product_id=eq.${item.product.id}" +
+                "&${eqOrNull("selected_size", item.selectedSize)}" +
+                "&${eqOrNull("selected_color", item.selectedColor)}" +
+                "&${eqOrNull("selected_variant_sku", item.selectedVariantSku)}&quantity=eq.$quantity",
+            token,
+            prefer = "return=representation"
+        )
+
     suspend fun clearCart(token: String, userId: String): RestResult =
         SupabaseRest.request("DELETE", "cart_items?user_id=eq.$userId", token)
 

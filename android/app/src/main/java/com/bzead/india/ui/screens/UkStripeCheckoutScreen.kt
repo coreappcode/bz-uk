@@ -38,35 +38,42 @@ internal fun UkStripeCheckoutScreen(onBack: () -> Unit, onOrderPlaced: (String) 
     var retry by remember { mutableStateOf(0) }
     var checking by remember { mutableStateOf(false) }
     var presenting by remember { mutableStateOf(false) }
-    var paymentSubmitted by remember { mutableStateOf(false) }
+    var pending by remember { mutableStateOf<BzeadRepository.PendingStripePayment?>(null) }
+    var canCancel by remember { mutableStateOf(false) }
+
+    fun checkPayment(payment: BzeadRepository.PendingStripePayment) {
+        checking = true
+        scope.launch {
+            try {
+                val orderId = BzeadRepository.confirmStripeOrder(payment)
+                if (orderId != null) {
+                    pending = null
+                    onOrderPlaced(orderId)
+                } else {
+                    message = "Payment confirmation is pending. Do not pay again. Reference: ${payment.paymentIntentId}"
+                }
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: BzeadRepository.StripePaymentNotCompleted) {
+                canCancel = true
+                message = "Payment was not completed. Cancel it before trying again."
+            } catch (e: Exception) {
+                message = "Payment confirmation is pending. Do not pay again. Reference: ${payment.paymentIntentId}"
+            } finally {
+                checking = false
+            }
+        }
+    }
+
     val sheet = remember {
         PaymentSheet.Builder { result ->
             presenting = false
-            when (result) {
-                is PaymentSheetResult.Completed -> {
-                    paymentSubmitted = true
-                    val payment = prepared
-                    if (payment == null) {
-                        message = "Unable to confirm this payment. Please contact support."
-                    } else {
-                        checking = true
-                        scope.launch {
-                            try {
-                                val orderId = BzeadRepository.confirmStripeOrder(payment)
-                                if (orderId != null) onOrderPlaced(orderId)
-                                else message = "Payment received; order confirmation is pending. Do not pay again. Reference: ${payment.session.paymentIntentId}"
-                            } catch (e: CancellationException) {
-                                throw e
-                            } catch (e: Exception) {
-                                message = "Payment confirmation is pending. Do not pay again. Reference: ${payment.session.paymentIntentId}"
-                            } finally {
-                                checking = false
-                            }
-                        }
-                    }
-                }
-                is PaymentSheetResult.Canceled -> message = "Payment cancelled. Check your orders before trying again if you were charged."
-                is PaymentSheetResult.Failed -> message = result.error.localizedMessage ?: "Payment failed. Please try again."
+            val payment = pending
+            if (payment != null) checkPayment(payment)
+            else message = when (result) {
+                is PaymentSheetResult.Completed -> "Unable to confirm this payment. Please contact support."
+                is PaymentSheetResult.Canceled -> "Payment cancelled. Check your orders before trying again."
+                is PaymentSheetResult.Failed -> result.error.localizedMessage ?: "Payment failed. Please check your orders."
             }
         }
     }.build()
@@ -76,7 +83,14 @@ internal fun UkStripeCheckoutScreen(onBack: () -> Unit, onOrderPlaced: (String) 
         prepared = null
         message = null
         try {
-            prepared = BzeadRepository.prepareStripePayment()
+            val previous = BzeadRepository.pendingStripePayment()
+            if (previous != null) {
+                pending = previous
+                checkPayment(previous)
+            } else {
+                pending = null
+                prepared = BzeadRepository.prepareStripePayment()
+            }
         } catch (e: CancellationException) {
             throw e
         } catch (e: Exception) {
@@ -92,22 +106,50 @@ internal fun UkStripeCheckoutScreen(onBack: () -> Unit, onOrderPlaced: (String) 
         prepared?.let { Text("Total: ${formatPrice(it.total)}") }
         message?.let { Text(it) }
         val payment = prepared
-        if (payment != null && !checking && !paymentSubmitted) {
+        if (pending != null && !checking && !presenting) {
+            Button(onClick = { pending?.let(::checkPayment) }, modifier = Modifier.fillMaxWidth()) { Text("Check payment status") }
+            if (canCancel) {
+                TextButton(onClick = {
+                    val paymentToCancel = pending ?: return@TextButton
+                    checking = true
+                    scope.launch {
+                        try {
+                            BzeadRepository.cancelUncompletedStripePayment(paymentToCancel)
+                            pending = null
+                            prepared = null
+                            canCancel = false
+                            message = "Payment cancelled. You can try again."
+                        } catch (e: CancellationException) {
+                            throw e
+                        } catch (e: Exception) {
+                            message = e.message ?: "Unable to cancel the payment. Check its status before paying again."
+                        } finally {
+                            checking = false
+                        }
+                    }
+                }) { Text("Cancel payment and try again") }
+            }
+        } else if (pending == null && payment != null && !checking && !presenting) {
             Button(
                 onClick = {
                     message = null
                     try {
+                        pending = BzeadRepository.rememberStripePayment(payment)
                         presenting = true
                         presentStripePaymentSheet(context, sheet, BuildConfig.STRIPE_PUBLISHABLE_KEY, payment.session)
                     } catch (e: IllegalArgumentException) {
                         presenting = false
                         message = e.message ?: "Stripe payment configuration is unavailable."
+                        pending?.let(::checkPayment)
+                    } catch (e: com.bzead.india.data.CheckoutException) {
+                        presenting = false
+                        message = e.message ?: "Unable to prepare payment."
                     }
                 },
                 modifier = Modifier.fillMaxWidth(),
                 enabled = !presenting
             ) { Text("Pay securely with Stripe") }
-        } else if (payment == null && !loading && !checking && !paymentSubmitted) {
+        } else if (pending == null && payment == null && !loading && !checking && !presenting) {
             Button(onClick = { retry++ }, modifier = Modifier.fillMaxWidth()) { Text("Try again") }
         }
         TextButton(onClick = onBack, enabled = !checking && !presenting) { Text("Back to review") }

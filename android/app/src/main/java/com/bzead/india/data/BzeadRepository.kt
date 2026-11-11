@@ -1123,7 +1123,6 @@ object BzeadRepository {
 
     /** Web OrderSummary pricing effect: quote, package-weight check, serviceability, then delivery estimate. */
     suspend fun loadOrderSummary(): OrderSummaryData {
-        StorefrontMarket.requireSupportedCheckout()
         val token = checkoutToken()
         val address = activeAddress() ?: throw CheckoutException("Please add a delivery address before placing the order.")
         val base = buildCheckoutItems(token)
@@ -1133,11 +1132,11 @@ object BzeadRepository {
         val missing = CheckoutApi.productsMissingWeight(items.map { it.productId }, token)
         val pin = address.pinCode.replace(Regex("\\s+"), "")
         var serviceable = true
-        if (pin.length == 6) {
+        if (!StorefrontMarket.isUk && pin.length == 6) {
             serviceable = CheckoutApi.isServiceable(pin, items.firstOrNull()?.sellerId ?: session?.userId.orEmpty(), token)
         }
         var eta: String? = null
-        if (serviceable) {
+        if (serviceable && !StorefrontMarket.isUk) {
             val tat = CheckoutApi.fetchTat(items.map { it.productId }, pin, token)
             if (tat.maxTatDays > 0 && tat.maxExpectedDate.isNotEmpty()) eta = tat.maxExpectedDate
         }
@@ -1183,7 +1182,6 @@ object BzeadRepository {
     /** Web ShippingAddress pricing effect: quotes the selected cart lines to the given destination. Returns an error message or null. */
     suspend fun quoteForAddress(country: String, pinCode: String): String? {
         return try {
-            StorefrontMarket.requireSupportedCheckout()
             val token = checkoutToken()
             val base = buildCheckoutItems(token)
             if (base.isNotEmpty()) CheckoutApi.calculateQuote(base, country, pinCode, token)
@@ -1209,8 +1207,71 @@ object BzeadRepository {
         val session: StripePaymentSession,
         val total: Double,
         val userId: String,
-        val purchasedCartItemIds: Set<String>
+        val purchasedCartQuantities: Map<String, Int>
     )
+
+    internal data class PendingStripePayment(
+        val paymentIntentId: String,
+        val total: Double,
+        val userId: String,
+        val purchasedCartQuantities: Map<String, Int>
+    )
+
+    internal class StripePaymentNotCompleted : Exception("Payment was not completed.")
+
+    private fun pendingPaymentPreferences(): android.content.SharedPreferences =
+        appContext?.getSharedPreferences("bzead_pending_stripe", android.content.Context.MODE_PRIVATE)
+            ?: throw CheckoutException("Unable to save payment recovery details.")
+
+    internal fun pendingStripePayment(): PendingStripePayment? {
+        val uid = session?.userId ?: throw CheckoutException("Please sign in to confirm your payment.")
+        val raw = pendingPaymentPreferences().getString(uid, null) ?: return null
+        val data = try {
+            JSONObject(raw)
+        } catch (e: org.json.JSONException) {
+            throw CheckoutException("Saved payment recovery details are invalid. Please contact support.")
+        }
+        val paymentId = data.optString("paymentIntentId")
+        val amount = data.optDouble("total", Double.NaN)
+        val items = data.optJSONObject("items") ?: throw CheckoutException("Saved payment recovery details are incomplete.")
+        val quantities = mutableMapOf<String, Int>()
+        val keys = items.keys()
+        while (keys.hasNext()) {
+            val id = keys.next()
+            val quantity = items.optInt(id, 0)
+            if (id.isBlank() || quantity <= 0) throw CheckoutException("Saved payment recovery details are invalid.")
+            quantities[id] = quantity
+        }
+        if (!paymentId.matches(Regex("pi_[A-Za-z0-9]+")) || !amount.isFinite() || amount <= 0 || quantities.isEmpty()) {
+            throw CheckoutException("Saved payment recovery details are invalid. Please contact support.")
+        }
+        return PendingStripePayment(paymentId, amount, uid, quantities)
+    }
+
+    internal fun rememberStripePayment(prepared: PreparedStripePayment): PendingStripePayment {
+        if (session?.userId != prepared.userId) throw CheckoutException("Please sign in to confirm your payment.")
+        if (pendingStripePayment() != null) throw CheckoutException("A previous payment is awaiting confirmation.")
+        val items = JSONObject()
+        prepared.purchasedCartQuantities.forEach { (id, quantity) -> items.put(id, quantity) }
+        val saved = JSONObject().put("paymentIntentId", prepared.session.paymentIntentId)
+            .put("total", prepared.total).put("items", items)
+        if (!pendingPaymentPreferences().edit().putString(prepared.userId, saved.toString()).commit()) {
+            throw CheckoutException("Unable to save payment recovery details. Please try again.")
+        }
+        return PendingStripePayment(prepared.session.paymentIntentId, prepared.total, prepared.userId, prepared.purchasedCartQuantities)
+    }
+
+    private fun forgetStripePayment(payment: PendingStripePayment) {
+        if (!pendingPaymentPreferences().edit().remove(payment.userId).commit()) {
+            throw CheckoutException("Unable to update payment recovery details. Please check your orders.")
+        }
+    }
+
+    internal suspend fun cancelUncompletedStripePayment(payment: PendingStripePayment) {
+        if (session?.userId != payment.userId) throw CheckoutException("Please sign in to confirm your payment.")
+        StripePaymentApi.cancelUncompletedPayment(checkoutToken(), payment.paymentIntentId, payment.total)
+        forgetStripePayment(payment)
+    }
 
     internal suspend fun prepareStripePayment(): PreparedStripePayment {
         val summary = loadOrderSummary()
@@ -1239,6 +1300,10 @@ object BzeadRepository {
         val shippingAmount = selectedOption?.shipping ?: summary.quote.shipping
         val total = selectedOption?.total ?: summary.quote.total
         val details = selectedOption?.details ?: summary.quote.shippingDetails
+        val deliveryDays = selectedOption?.estimatedDays?.let { Regex("^\\s*(\\d+)").find(it)?.groupValues?.get(1)?.toIntOrNull() }
+        val deliveryDate = selectedOption?.estimatedDelivery?.takeIf { it.matches(Regex("\\d{4}-\\d{2}-\\d{2}")) }
+        shipping.put("expected_delivery_days", deliveryDays ?: JSONObject.NULL)
+            .put("expected_delivery_date", deliveryDate ?: JSONObject.NULL)
         val payment = StripePaymentApi.createSession(token, total, summary.items.size)
         val params = CheckoutApi.buildRpcParams(
             customerId = uid,
@@ -1252,42 +1317,44 @@ object BzeadRepository {
             shippingAmount = shippingAmount,
             actualShippingCost = summary.quote.actualShippingCost,
             platformShippingMargin = summary.quote.platformShippingMargin,
-            expectedDeliveryDate = summary.estimatedDeliveryDate,
-            expectedDeliveryDays = null
+            expectedDeliveryDate = deliveryDate,
+            expectedDeliveryDays = deliveryDays
         )
             .put("p_currency", "GBP")
             .put("p_idempotency_key", "stripe_${payment.paymentIntentId}")
-            .put("p_payment_method", "stripe")
             .put("p_shipping_provider", details?.provider ?: JSONObject.NULL)
             .put("p_shipping_carrier", details?.carrier ?: JSONObject.NULL)
             .put("p_shipping_service_level", details?.service ?: JSONObject.NULL)
             .put("p_shipping_rate_id", details?.rateId ?: JSONObject.NULL)
         StripePaymentApi.saveRecoverySnapshot(token, uid, payment, params)
-        return PreparedStripePayment(payment, total, uid, summary.items.map { it.cartItemId }.toSet())
+        return PreparedStripePayment(payment, total, uid, summary.items.associate { it.cartItemId to it.quantity })
     }
 
-    internal suspend fun confirmStripeOrder(prepared: PreparedStripePayment): String? {
+    internal suspend fun confirmStripeOrder(prepared: PendingStripePayment): String? {
         if (session?.userId != prepared.userId) throw CheckoutException("Please sign in to confirm your payment.")
         val deadline = System.currentTimeMillis() + 30_000
         var verified = false
+        var creationAttempts = 0
         while (System.currentTimeMillis() < deadline) {
             if (!verified) {
-                when (StripePaymentApi.verifyPayment(checkoutToken(), prepared.session.paymentIntentId, prepared.total)) {
+                when (StripePaymentApi.verifyPayment(checkoutToken(), prepared.paymentIntentId, prepared.total)) {
                     StripePaymentApi.PaymentStatus.SUCCEEDED -> verified = true
-                    StripePaymentApi.PaymentStatus.FAILED -> throw CheckoutException("Payment was not completed. Check your orders before trying again.")
+                    StripePaymentApi.PaymentStatus.FAILED -> {
+                        throw StripePaymentNotCompleted()
+                    }
                     StripePaymentApi.PaymentStatus.PENDING -> {
                         kotlinx.coroutines.delay(1500)
                         continue
                     }
                 }
             }
-            val order = CheckoutApi.waitForOrder(checkoutToken(), prepared.session.paymentIntentId, 1_000, 1_500)
+            val order = CheckoutApi.waitForOrder(checkoutToken(), prepared.paymentIntentId, 1_000, 1_500)
             if (order != null && order.second.lowercase() in setOf("completed", "succeeded", "paid")) {
-                val purchased = _cartItems.value.filter { it.id in prepared.purchasedCartItemIds }
+                val purchased = _cartItems.value.filter { prepared.purchasedCartQuantities[it.id] == it.quantity }
                 for (item in purchased) {
                     if (UserDataApi.isUuid(item.product.id)) {
-                        val result = UserDataApi.deleteCartItem(checkoutToken(), prepared.userId, item)
-                        if (!result.ok) {
+                        val result = UserDataApi.deletePurchasedCartItem(checkoutToken(), prepared.userId, item, item.quantity)
+                        if (!result.ok || result.rows.length() == 0) {
                             _dataError.value = "Your order is confirmed, but an item could not be removed from your cart."
                             continue
                         }
@@ -1296,7 +1363,16 @@ object BzeadRepository {
                 }
                 checkoutSelectedIds.value = emptySet()
                 loadOrders(prepared.userId)
+                forgetStripePayment(prepared)
                 return order.first
+            }
+            if (creationAttempts < 3) {
+                creationAttempts++
+                try {
+                    CheckoutApi.createPaidOrderFromSnapshot(checkoutToken(), prepared.userId, prepared.paymentIntentId)
+                } catch (e: CheckoutException) {
+                    android.util.Log.w("BzeadCheckout", "Paid order creation is pending: ${e.message}")
+                }
             }
             kotlinx.coroutines.delay(1500)
         }
@@ -1323,7 +1399,7 @@ object BzeadRepository {
         val m = quote.minimumOrder?.takeIf { !it.isMet } ?: return null
         val remaining = (m.minimumInr - m.currentSubtotalInr).coerceAtLeast(0.0)
         return "Minimum order for India-origin products shipping to ${address.country.trim().ifEmpty { "selected destination" }} is " +
-            "${formatInr(m.minimumInr)} (${formatInr(m.minimumInr)}). Add ${formatInr(remaining)} more to continue."
+            "${formatInr(m.minimumInr)}. Add ${formatInr(remaining)} more to continue."
     }
 
     private fun formatInr(v: Double): String = "₹" + java.text.DecimalFormat("#,##0.##").format(v)

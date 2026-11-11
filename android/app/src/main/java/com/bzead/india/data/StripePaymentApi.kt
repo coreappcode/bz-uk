@@ -29,6 +29,17 @@ internal object StripePaymentApi {
         return parsePaymentStatus(result.json() ?: throw CheckoutException("The payment verification response is invalid."))
     }
 
+    suspend fun cancelUncompletedPayment(token: String, paymentIntentId: String, totalGbp: Double) {
+        val result = SupabaseRest.callFunction(
+            "verify-android-stripe-payment", token,
+            JSONObject().put("paymentIntentId", paymentIntentId).put("expectedAmount", amountInPence(totalGbp))
+                .put("action", "cancel")
+        )
+        if (!result.ok || parsePaymentStatus(result.json() ?: throw CheckoutException("Payment cancellation response is invalid.")) != PaymentStatus.FAILED) {
+            throw CheckoutException("Unable to cancel the previous payment. Check its status before paying again.")
+        }
+    }
+
     fun amountInPence(total: Double): Long {
         if (!total.isFinite() || total <= 0 || total > 50_000.0) {
             throw CheckoutException("Invalid GBP checkout total.")

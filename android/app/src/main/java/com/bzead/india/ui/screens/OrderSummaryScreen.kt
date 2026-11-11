@@ -309,7 +309,7 @@ fun OrderSummaryScreen(
                             .background(OsNavy).padding(horizontal = 16.dp, vertical = 12.dp)
                     ) {
                         Text(
-                            "Minimum product value for shipment is ${formatPrice(quote.minimumOrder.minimumInr)}",
+                            "Minimum product value for shipment is ₹${java.text.DecimalFormat("#,##0.##").format(quote.minimumOrder.minimumInr)}",
                             fontSize = 14.sp, fontWeight = FontWeight.SemiBold, color = Color.White
                         )
                         Text("Add more items to complete your order.", fontSize = 12.sp, color = Color.White.copy(alpha = 0.8f))

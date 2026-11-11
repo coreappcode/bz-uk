@@ -158,10 +158,9 @@ the Play app-signing certificate is separate. An APK signed locally with the
 upload key is not signed with the Play app-signing key and cannot establish the
 production App Links association unless its certificate is also authorized.
 
-The project is not yet a UK-ready storefront. UK catalog and cart prices use the
+The project is not yet a release-ready UK storefront. UK catalog and cart prices use the
 UK public-price RPC and country exchange rates to display GBP; unavailable prices
-are not substituted with source-currency values. Shipping quotes and the order
-flow still implement the India market, and historical order displays have not
+are not substituted with source-currency values. Historical order displays have not
 been adapted to the order currency.
 UK builds select and manage UK addresses without selecting overseas addresses.
 The India quote engine and Razorpay checkout are blocked for the UK application until a
@@ -169,19 +168,20 @@ UK pricing and native Stripe payment flow is implemented and verified. Do not
 release it as a working UK shopping app based on its application ID alone.
 
 The Android project includes a UK shipping rate-card/carrier adapter and Stripe
-PaymentSheet scaffolding, but neither is connected to a complete UK checkout
-quote. An experimental UK quote calculation loads product and shipping data and
-calculates GBP totals, but is not connected to checkout and does not yet
-implement all website shipping options and recovery requirements. The separate
-`create-android-payment-intent` function has not been
-deployed; its client-supplied amount must be replaced with a server-verified UK
-quote before enabling payments. Validate shipping, customer-session card saving,
-3-D Secure, webhook recovery, and charge/order amounts in Stripe test mode
-before removing the checkout guard. The live web payment function is unchanged.
+PaymentSheet scaffolding. The UK quote is connected to address and review, but
+its shipping options and recovery requirements are not fully verified. The
+separate `create-android-payment-intent` function has not been deployed.
+Like the web payment function, it receives the freshly calculated client amount;
+neither is a server-authoritative quote. The Android payment guard remains in
+place until payment and order recovery are complete. The live web payment
+function is unchanged.
 The separate Android Stripe status verification function checks the authenticated
-buyer and the Stripe payment status; it has not been deployed and does not
-validate the checkout quote or replace order recovery. Its comparison with the
-app's prepared amount is a consistency check, not an authoritative quote.
+buyer and Stripe payment status, and can cancel an uncompleted intent before
+retry. It has not been deployed and does not validate the checkout quote. Its
+comparison with the app's prepared amount is a consistency check, not an
+authoritative quote. The app persists a pending payment reference locally and
+uses the saved server snapshot to retry order creation after verified payment;
+this recovery flow still requires end-to-end verification.
 The experimental UK quote uses the standard international Shippo tier and
 calculates available delivery tiers using the web's standard-rate delta approach.
 Multi-shipment tier selection and fulfillment details still need parity
