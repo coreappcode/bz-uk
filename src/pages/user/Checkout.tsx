@@ -1802,18 +1802,19 @@ const Checkout: React.FC = () => {
         });
         if (quoteRequestRef.current !== requestId) return;
 
-        // Determine the shipping/total for the tier selected in OrderSummary.
-        // The base quote.shipping/quote.total are always standard tier.
-        // If user chose premium or express, use the matching intlShippingOptions entry.
         const tier = checkoutData.shippingTier || 'standard';
         let tierShipping = quote.shipping;
         let tierTotal = quote.total;
-        if (tier !== 'standard' && quote.intlShippingOptions) {
-          const tierOption = quote.intlShippingOptions[tier];
-          if (tierOption) {
-            tierShipping = tierOption.shipping;
-            tierTotal = tierOption.total;
+        if (tier !== 'standard') {
+          const tierOptions = quote.intlShippingOptions || quote.ukDomesticShippingOptions;
+          const tierOption = tierOptions?.[tier];
+          if (!tierOption) {
+            setLiveQuote(null);
+            setLiveQuoteError('The selected delivery option is no longer available. Please return to review and choose another option.');
+            return;
           }
+          tierShipping = tierOption.shipping;
+          tierTotal = tierOption.total;
         }
 
         const prepaidShipping = checkoutData.shippingAmount ?? 0;
@@ -1830,6 +1831,7 @@ const Checkout: React.FC = () => {
       } catch (err) {
         console.error('[Checkout] Failed to refresh live checkout quote:', err);
         if (quoteRequestRef.current === requestId) {
+          setLiveQuote(null);
           setLiveQuoteError('Unable to load backend checkout configuration. Please return to review and try again.');
         }
       } finally {
