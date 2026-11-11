@@ -22,24 +22,12 @@ android {
     testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
   }
 
-  // Do not remove or modify these signingConfigs. They are necessary for building, installing,
-  // and updating Android apps in AI Studio.
   signingConfigs {
     create("release") {
-      val desktopKeystore = file("C:/Users/DHIJIN LAL M/Desktop/bzindiakeys/bzead-india-upload-key.jks")
-      val rootKeystore = file("${rootDir}/bzead-india-upload-key.jks")
-      val keystoreFile = if (rootKeystore.exists()) rootKeystore else desktopKeystore
-      val keystorePath = System.getenv("KEYSTORE_PATH") ?: keystoreFile.absolutePath
-
-      val desktopPasswordFile = file("C:/Users/DHIJIN LAL M/Desktop/bzindiakeys/bzead-india-upload-key-password.txt")
-      val rootPasswordFile = file("${rootDir}/bzead-india-upload-key-password.txt")
-      val passwordFile = if (rootPasswordFile.exists()) rootPasswordFile else desktopPasswordFile
-      val filePassword = if (passwordFile.exists()) passwordFile.readLines().firstOrNull()?.trim() else null
-
-      storeFile = file(keystorePath)
-      storePassword = System.getenv("STORE_PASSWORD") ?: filePassword
-      keyAlias = System.getenv("KEY_ALIAS") ?: "bzead-india-upload"
-      keyPassword = System.getenv("KEY_PASSWORD") ?: filePassword
+      storeFile = System.getenv("KEYSTORE_PATH")?.takeIf { it.isNotBlank() }?.let { file(it) }
+      storePassword = System.getenv("STORE_PASSWORD")
+      keyAlias = System.getenv("KEY_ALIAS") ?: "bzead-uk-upload"
+      keyPassword = System.getenv("KEY_PASSWORD")
     }
     val rootDebugKeystore = file("${rootDir}/debug.keystore")
     val defaultDebugKeystore = file("${System.getProperty("user.home")}/.android/debug.keystore")

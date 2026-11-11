@@ -149,6 +149,15 @@ supported Android versions, verify both domain associations in
 Android's App Links settings, and test cold and warm product and section links,
 review fallback, and login/checkout links. A debug-signed APK does not use the
 Play signing certificate and cannot establish the production association.
+
+Release builds require `KEYSTORE_PATH`, `STORE_PASSWORD` and `KEY_PASSWORD` in
+the build environment. `KEY_ALIAS` defaults to `bzead-uk-upload`. Keep the UK
+upload keystore and passwords outside the repository and back them up securely.
+The upload certificate must match the upload key registered in Play Console;
+the Play app-signing certificate is separate. An APK signed locally with the
+upload key is not signed with the Play app-signing key and cannot establish the
+production App Links association unless its certificate is also authorized.
+
 The project is not yet a UK-ready storefront. UK catalog and cart prices use the
 UK public-price RPC and country exchange rates to display GBP; unavailable prices
 are not substituted with source-currency values. Shipping quotes and the order
