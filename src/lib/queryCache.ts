@@ -3,8 +3,10 @@
 // reload or return visit doesn't wait on the network. Concurrent identical
 // requests share one in-flight promise.
 
+import { runtimeEnv } from './runtimeEnv.ts';
+
 const PREFIX = 'beauzead_qc_v1:';
-const MARKET_KEY = import.meta.env.VITE_MARKET || 'GLOBAL';
+const MARKET_KEY = runtimeEnv.VITE_MARKET || 'GLOBAL';
 const MAX_ENTRY_CHARS = 400_000;
 const MAX_PERSISTED_ENTRIES = 60;
 

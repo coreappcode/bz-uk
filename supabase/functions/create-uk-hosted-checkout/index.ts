@@ -18,6 +18,9 @@ Deno.serve(async (req: Request) => {
   });
   if (req.method === "OPTIONS") return json({}, 200);
   if (req.method !== "POST") return json({ error: "Method not allowed" }, 405);
+  if (Deno.env.get("UK_HOSTED_CHECKOUT_ENABLED") !== "true") {
+    return json({ error: "UK hosted checkout is not enabled" }, 503);
+  }
   if (Number(req.headers.get("content-length") || "0") > 8192) {
     return json({ error: "Request too large" }, 413);
   }
@@ -43,14 +46,14 @@ Deno.serve(async (req: Request) => {
     const { data: auth, error: authError } = await db.auth.getUser(authorization.slice(7));
     if (authError || !auth.user) return json({ error: "Invalid authentication token" }, 401);
     const { data: snapshot, error } = await db.from("uk_hosted_checkout_sessions")
-      .select("id,user_id,stripe_session_id,stripe_account_id,livemode,amount_minor,currency,created_at,order_id")
+      .select("id,user_id,stripe_session_id,stripe_account_id,livemode,amount_minor,currency,created_at,order_id,closed_at")
       .eq("id", snapshotId).maybeSingle();
     if (error) throw error;
     const livemode = /^(sk|rk)_live_/.test(stripeKey);
     if (!snapshot || snapshot.user_id !== auth.user.id || snapshot.stripe_account_id !== accountId ||
         snapshot.livemode !== livemode || snapshot.currency !== "gbp" ||
         !Number.isSafeInteger(snapshot.amount_minor) || snapshot.amount_minor <= 0 ||
-        snapshot.amount_minor > 5_000_000 || snapshot.order_id) {
+        snapshot.amount_minor > 5_000_000 || snapshot.order_id || snapshot.closed_at) {
       return json({ error: "Checkout is no longer available" }, 409);
     }
     const createdAt = Date.parse(snapshot.created_at);
@@ -108,11 +111,11 @@ Deno.serve(async (req: Request) => {
     }
     const { data: saved, error: saveError } = await db.from("uk_hosted_checkout_sessions")
       .update({ stripe_session_id: session.id, updated_at: new Date().toISOString() })
-      .eq("id", snapshotId).is("order_id", null).select("stripe_session_id").single();
+      .eq("id", snapshotId).is("order_id", null).is("closed_at", null).select("stripe_session_id").single();
     if (saveError || saved?.stripe_session_id !== session.id) {
       throw saveError || new Error("Unable to save checkout session");
     }
-    return json({ checkoutUrl: session.url }, 200);
+    return json({ checkoutUrl: session.url, sessionId: session.id }, 200);
   } catch (error) {
     console.error("[create-uk-hosted-checkout] Initialization failed:", error);
     return json({ error: "Unable to initialize UK payment. Please try again." }, 502);

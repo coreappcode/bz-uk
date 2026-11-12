@@ -4,6 +4,10 @@ import { recoverUkHostedCheckout } from "../_shared/uk-hosted-checkout.ts";
 
 const origins = new Set(["https://bzead.uk", "https://www.bzead.uk"]);
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
 Deno.serve(async (req: Request) => {
   const origin = req.headers.get("origin") || "";
   const json = (body: unknown, status: number) => new Response(JSON.stringify(body), {
@@ -38,6 +42,8 @@ Deno.serve(async (req: Request) => {
     if (typeof sessionId !== "string" || !/^cs_(test|live)_[A-Za-z0-9]+$/.test(sessionId)) {
       return json({ error: "Invalid checkout session" }, 400);
     }
+    const action = isRecord(body) && "action" in body ? body.action : "verify";
+    if (action !== "verify" && action !== "cancel") return json({ error: "Invalid action" }, 400);
     const db = createClient(url, key);
     const { data: auth, error: authError } = await db.auth.getUser(authorization.slice(7));
     if (authError || !auth.user) return json({ error: "Invalid authentication token" }, 401);
@@ -47,13 +53,38 @@ Deno.serve(async (req: Request) => {
     });
     const account = await stripe.accounts.retrieve();
     if (account.id !== accountId) throw new Error("Stripe account does not match UK configuration");
-    const result = await recoverUkHostedCheckout(
+    let result = await recoverUkHostedCheckout(
       stripe, db, sessionId, accountId, /^(sk|rk)_live_/.test(stripeKey), auth.user.id,
     );
+    if (action === "cancel" && result.status !== "paid") {
+      let session = await stripe.checkout.sessions.retrieve(sessionId);
+      if (session.status === "open" && session.payment_status === "unpaid") {
+        session = await stripe.checkout.sessions.expire(sessionId);
+      }
+      if (session.status !== "expired" || session.payment_status !== "unpaid") {
+        result = await recoverUkHostedCheckout(
+          stripe, db, sessionId, accountId, /^(sk|rk)_live_/.test(stripeKey), auth.user.id,
+        );
+        if (result.status !== "paid") return json({ error: "Payment is processing. Do not start another checkout." }, 409);
+      } else {
+        const { data: closed, error } = await db.from("uk_hosted_checkout_sessions")
+          .update({ closed_at: new Date().toISOString() })
+          .eq("stripe_session_id", sessionId).eq("user_id", auth.user.id).is("order_id", null)
+          .select("id").maybeSingle();
+        if (error || !closed) throw error || new Error("Unable to close checkout");
+        return json({ status: "expired" }, 200);
+      }
+    }
     if (result.status === "paid") {
       const { error } = await db.rpc("notify_uk_hosted_order", { p_snapshot_id: result.snapshotId });
       if (error) throw error;
       return json({ status: result.status, orderId: result.orderId, paymentIntentId: result.paymentIntentId }, 200);
+    }
+    if (result.status === "expired") {
+      const { error } = await db.from("uk_hosted_checkout_sessions")
+        .update({ closed_at: new Date().toISOString() })
+        .eq("stripe_session_id", sessionId).eq("user_id", auth.user.id).is("order_id", null);
+      if (error) throw error;
     }
     return json(result, 200);
   } catch (error) {

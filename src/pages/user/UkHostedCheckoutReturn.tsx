@@ -4,6 +4,7 @@ import { Header } from '../../components/layout/Header';
 import { Footer } from '../../components/layout/Footer';
 import { MobileNav } from '../../components/layout/MobileNav';
 import { useAuth } from '../../contexts/AuthContext';
+import { useCart } from '../../contexts/CartContext';
 import { supabase } from '../../lib/supabase';
 
 type PaymentState =
@@ -15,8 +16,10 @@ type PaymentState =
 const UkHostedCheckoutReturn: React.FC = () => {
   const { search } = useLocation();
   const { user, currentAuthUser, loading } = useAuth();
+  const { syncCartWithBackend, loadError } = useCart();
   const [attempt, setAttempt] = useState(0);
   const [payment, setPayment] = useState<PaymentState>({ status: 'loading' });
+  const [cancelling, setCancelling] = useState(false);
   const userId = user?.id || currentAuthUser?.userId;
   const sessionId = new URLSearchParams(search).get('session_id') || '';
 
@@ -52,6 +55,35 @@ const UkHostedCheckoutReturn: React.FC = () => {
     return () => { cancelled = true; };
   }, [loading, userId, sessionId, attempt]);
 
+  useEffect(() => {
+    if (payment.status !== 'paid' || !userId) return;
+    void syncCartWithBackend(userId).catch((error: unknown) => {
+      console.error('[UkHostedCheckoutReturn] Cart refresh failed:', error);
+    });
+  }, [payment.status, syncCartWithBackend, userId]);
+
+  const cancelCheckout = async () => {
+    setCancelling(true);
+    try {
+      const { data, error } = await supabase.functions.invoke('verify-uk-hosted-checkout', {
+        body: { sessionId, action: 'cancel' },
+      });
+      if (error || !data) throw error || new Error('Empty verification response');
+      if (data.status === 'paid' && typeof data.orderId === 'string') {
+        setPayment({ status: 'paid', orderId: data.orderId });
+      } else if (data.status === 'expired') {
+        setPayment({ status: 'expired' });
+      } else {
+        throw new Error('Payment could not be cancelled');
+      }
+    } catch (error) {
+      console.error('[UkHostedCheckoutReturn] Cancellation failed:', error);
+      setPayment({ status: 'error', message: 'We could not cancel this checkout. Do not start another payment until its status is confirmed.' });
+    } finally {
+      setCancelling(false);
+    }
+  };
+
   return (
     <div className="min-h-screen bg-[#eaeded] flex flex-col">
       <Header />
@@ -62,13 +94,21 @@ const UkHostedCheckoutReturn: React.FC = () => {
           ) : payment.status === 'paid' ? (
             <><h1 className="text-xl font-bold text-green-700">Payment successful</h1>
               <p className="mt-3">Your order has been confirmed.</p>
+              {loadError && <p className="mt-3 text-amber-800">Your cart could not be refreshed. Reload the cart before making another purchase.</p>}
               <Link className="inline-block mt-5 text-blue-700 underline" to={`/orders/${encodeURIComponent(payment.orderId)}`}>View your order</Link></>
           ) : (
             <><h1 className="text-xl font-bold">Payment confirmation</h1>
               <p className="mt-3">{payment.status === 'error' ? payment.message : payment.status === 'expired'
                 ? 'This checkout session has expired without a confirmed payment.'
                 : 'Payment has not been confirmed. If you have already paid, do not pay again; check again or contact support.'}</p>
-              <button className="mt-5 px-5 py-2 rounded bg-[#ffd814] font-semibold" onClick={() => setAttempt((value) => value + 1)}>Check again</button></>
+              <button className="mt-5 px-5 py-2 rounded bg-[#ffd814] font-semibold" onClick={() => setAttempt((value) => value + 1)}>Check again</button>
+              {payment.status === 'unpaid' && (
+                <button className="mt-5 ml-3 px-5 py-2 rounded border border-gray-400 font-semibold" disabled={cancelling} onClick={() => void cancelCheckout()}>
+                  {cancelling ? 'Cancelling...' : 'Cancel checkout'}
+                </button>
+              )}
+              {payment.status === 'expired' && <p className="mt-4"><Link className="text-blue-700 underline" to="/cart">Return to cart</Link></p>}
+            </>
           )}
         </div>
       </main>

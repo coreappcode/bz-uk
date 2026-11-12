@@ -1,5 +1,5 @@
-import { cachedQuery, QUERY_TTL } from './queryCache';
-import { supabase } from './supabase';
+import { cachedQuery, QUERY_TTL } from './queryCache.ts';
+import { supabase } from './supabase.ts';
 
 export interface PublicProductPrice {
   productId: string;
@@ -58,6 +58,7 @@ const normalizeVariantValue = (value?: string | null) => String(value || '').tri
 export async function fetchVerifiedVariantPrices(
   requests: VariantPriceRequest[],
   country?: string | null,
+  fresh = false,
 ): Promise<{ data: Record<string, VerifiedVariantPrice>; error: string | null }> {
   const validRequests = requests.filter((request) => request.key && request.productId);
   if (validRequests.length === 0) {
@@ -137,7 +138,8 @@ export async function fetchVerifiedVariantPrices(
   const pricesByKey: Record<string, VerifiedVariantPrice> = {};
   for (const variant of selectedVariants) {
     const basePrice = Number(variant.row.price);
-    const { data, error } = await fetchPublicProductPrices(
+    const fetchPrices = fresh ? fetchPublicProductPricesUncached : fetchPublicProductPrices;
+    const { data, error } = await fetchPrices(
       [variant.productId],
       country,
       { [variant.productId]: basePrice },

@@ -1,11 +1,12 @@
-import { supabase } from './supabase';
-import { convertAmount, resolveCurrencyFromCountry } from '../utils/currency';
+import { supabase } from './supabase.ts';
+import { convertAmount, resolveCurrencyFromCountry } from '../utils/currency.ts';
 import {
   IS_UK_STOREFRONT,
   isUKCountry,
   STOREFRONT_CURRENCY_CODE,
-} from '../config/market';
-import { fetchVerifiedVariantPrices } from './pricingService';
+} from '../config/market.ts';
+import { fetchVerifiedVariantPrices } from './pricingService.ts';
+import { runtimeEnv } from './runtimeEnv.ts';
 
 export interface CheckoutPricingInputItem {
   cartItemId?: string;
@@ -208,8 +209,8 @@ let checkoutReferenceCache: {
 
 const CHECKOUT_REFERENCE_CACHE_TTL_MS = 5 * 60 * 1000;
 
-const getCheckoutReferenceData = async () => {
-  if (checkoutReferenceCache && Date.now() < checkoutReferenceCache.expiresAt) {
+const getCheckoutReferenceData = async (fresh = false) => {
+  if (!fresh && checkoutReferenceCache && Date.now() < checkoutReferenceCache.expiresAt) {
     return checkoutReferenceCache;
   }
 
@@ -244,6 +245,11 @@ const getCheckoutReferenceData = async () => {
     throw new Error(
       `[checkoutPricing] Failed to load minimum-order rules: ${checkoutMinOrderRulesResponse.error.message}`
     );
+  }
+  if (fresh) {
+    const error = countriesResponse.error || measurementUnitsResponse.error
+      || shippingProviderConfigResponse.error || platformCommissionRulesResponse.error;
+    if (error) throw new Error(`[checkoutPricing] Failed to load checkout configuration: ${error.message}`);
   }
 
   checkoutReferenceCache = {
@@ -360,8 +366,8 @@ const fetchShiprocketDomesticRate = async (params: {
   cod?: boolean;
 }): Promise<ShiprocketDomesticRateResult> => {
   try {
-    const supabaseUrlBase = String(import.meta.env.VITE_SUPABASE_URL || '').trim().replace(/\/+$/, '');
-    const anonKey = String(import.meta.env.VITE_SUPABASE_ANON_KEY || '').trim();
+    const supabaseUrlBase = String(runtimeEnv.VITE_SUPABASE_URL || '').trim().replace(/\/+$/, '');
+    const anonKey = String(runtimeEnv.VITE_SUPABASE_ANON_KEY || '').trim();
 
     const rateRes = await fetch(`${supabaseUrlBase}/functions/v1/shiprocket-rate`, {
       method: 'POST',
@@ -422,6 +428,7 @@ export async function calculateDestinationCheckoutPricing(input: {
   destinationPostalCode?: string;
   rates: Record<string, number>;
   isCod?: boolean;
+  strict?: boolean;
 }): Promise<DestinationCheckoutPricing> {
   const filteredItems = input.items.filter((item) => item.productId && item.quantity > 0);
   const destinationCountry = input.destinationCountry.trim();
@@ -469,6 +476,7 @@ export async function calculateDestinationCheckoutPricing(input: {
       selectedColor: item.selectedColor,
     })),
     destinationCountry || null,
+    input.strict,
   );
   if (verifiedVariantPrices.error) {
     throw new Error(verifiedVariantPrices.error);
@@ -487,6 +495,7 @@ export async function calculateDestinationCheckoutPricing(input: {
         'get_public_product_prices',
         { p_product_ids: nonVariantProductIds, p_country: destinationCountry || null }
       );
+      if (markupErr && input.strict) throw new Error(`Unable to verify product prices: ${markupErr.message}`);
       if (!markupErr && Array.isArray(markupRows)) {
         for (const row of markupRows as Array<{ product_id: string; selling_price: unknown }>) {
           const price = Number(row.selling_price);
@@ -496,7 +505,8 @@ export async function calculateDestinationCheckoutPricing(input: {
         }
       }
     }
-  } catch {
+  } catch (error) {
+    if (input.strict) throw error;
     // Non-fatal: per-country table fallback below can still populate markup prices.
   }
 
@@ -514,9 +524,12 @@ export async function calculateDestinationCheckoutPricing(input: {
       .select('product_id, offer_type, buy_quantity, get_quantity, special_day_name, discount_percent, start_time, end_time, bundle_min_qty, bundle_discount, is_active')
       .in('product_id', productIds)
       .eq('is_active', true),
-    getCheckoutReferenceData(),
+    getCheckoutReferenceData(input.strict),
   ]);
 
+  if (input.strict && (productRowsResponse.error || offerRulesResponse.error)) {
+    throw new Error('Unable to verify products or offers for checkout.');
+  }
   const productRows = (productRowsResponse.data || []) as ProductCountryRow[];
   const countries = referenceData.countries;
   const measurementUnitRows = referenceData.measurementUnits;
@@ -553,6 +566,9 @@ export async function calculateDestinationCheckoutPricing(input: {
       ? supabase.from('seller_kyc').select('seller_id, business_postal_code').in('seller_id', sellerIds)
       : Promise.resolve({ data: [], error: null }),
   ]);
+  if (input.strict && (sellerProfilesResponse.error || sellerKycPostalResponse.error)) {
+    throw new Error('Unable to verify seller shipping information.');
+  }
   const sellerProfileRows = (sellerProfilesResponse.data || []) as ProfileCountryRow[];
   const kycPostalBySellerId = new Map(
     ((sellerKycPostalResponse.data || []) as { seller_id: string; business_postal_code: string }[])
@@ -575,12 +591,13 @@ export async function calculateDestinationCheckoutPricing(input: {
   const destinationCountryId = destinationCountryRow?.id || null;
 
   if (destinationCountryId) {
-    const { data: countryPriceRows } = await supabase
+    const { data: countryPriceRows, error: countryPriceError } = await supabase
       .from('product_country_selling_prices')
       .select('product_id, selling_price')
       .in('product_id', productIds)
       .eq('country_id', destinationCountryId);
 
+    if (input.strict && countryPriceError) throw new Error('Unable to verify destination pricing.');
     (countryPriceRows || []).forEach((row: any) => {
       const productId = String(row.product_id || '');
       const sellingPrice = Number(row.selling_price);
@@ -1216,8 +1233,8 @@ export async function calculateDestinationCheckoutPricing(input: {
 
   // ── Fetch Shippo domestic live rates per seller ──
   {
-    const supabaseUrlBase = String(import.meta.env.VITE_SUPABASE_URL || '').trim().replace(/\/+$/, '');
-    const anonKey = String(import.meta.env.VITE_SUPABASE_ANON_KEY || '').trim();
+    const supabaseUrlBase = String(runtimeEnv.VITE_SUPABASE_URL || '').trim().replace(/\/+$/, '');
+    const anonKey = String(runtimeEnv.VITE_SUPABASE_ANON_KEY || '').trim();
 
     await Promise.all(Array.from(shippoDomesticGroups.values()).map(async (sellerItems) => {
       if (sellerItems.length === 0) return;
@@ -1375,8 +1392,8 @@ export async function calculateDestinationCheckoutPricing(input: {
   };
 
   {
-    const supabaseUrlBase = String(import.meta.env.VITE_SUPABASE_URL || '').trim().replace(/\/+$/, '');
-    const anonKey = String(import.meta.env.VITE_SUPABASE_ANON_KEY || '').trim();
+    const supabaseUrlBase = String(runtimeEnv.VITE_SUPABASE_URL || '').trim().replace(/\/+$/, '');
+    const anonKey = String(runtimeEnv.VITE_SUPABASE_ANON_KEY || '').trim();
 
     // ── Non-Shippo-origin items → Shiprocket ──
     if (shiprocketOriginIntlItems.length > 0) {

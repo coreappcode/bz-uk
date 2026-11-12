@@ -9,16 +9,23 @@ create table public.uk_hosted_checkout_sessions (
   amount_minor bigint not null check (amount_minor > 0),
   currency text not null check (currency = 'gbp'),
   rpc_params jsonb not null check (jsonb_typeof(rpc_params) = 'object'),
+  quote jsonb not null check (jsonb_typeof(quote) = 'object'),
+  cart_snapshot jsonb not null default '[]'::jsonb check (jsonb_typeof(cart_snapshot) = 'array'),
   order_id uuid references public.orders(id),
   payment_intent_id text unique,
   notifications_created_at timestamptz,
+  closed_at timestamptz,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
 );
 
 alter table public.uk_hosted_checkout_sessions enable row level security;
 revoke all on public.uk_hosted_checkout_sessions from public, anon, authenticated;
-grant select, insert, update on public.uk_hosted_checkout_sessions to service_role;
+grant select, insert, update, delete on public.uk_hosted_checkout_sessions to service_role;
+
+create unique index uk_hosted_checkout_one_active_user
+  on public.uk_hosted_checkout_sessions(user_id)
+  where order_id is null and closed_at is null;
 
 create function public.recover_uk_hosted_checkout(
   p_snapshot_id uuid,
@@ -39,6 +46,13 @@ declare
   v_rpc jsonb;
   v_result jsonb;
   v_order public.orders%rowtype;
+  v_cart_row jsonb;
+  v_line record;
+  v_item_id uuid;
+  v_matches integer;
+  v_subtotal numeric;
+  v_discount numeric;
+  v_shipping numeric;
 begin
   if coalesce(auth.role(), '') <> 'service_role' then
     raise exception 'Unauthorized';
@@ -65,6 +79,17 @@ begin
     or jsonb_typeof(v_rpc->'p_items') is distinct from 'array'
     or jsonb_array_length(v_rpc->'p_items') = 0 then
     raise exception 'Invalid checkout snapshot';
+  end if;
+  v_subtotal := (v_snapshot.quote->>'subtotal')::numeric;
+  v_discount := (v_snapshot.quote->>'offer_discount')::numeric;
+  v_shipping := (v_snapshot.quote->>'shipping')::numeric;
+  if v_subtotal is null or v_subtotal <= 0 or v_discount is null or v_discount < 0
+    or v_discount > v_subtotal or v_shipping is null or v_shipping < 0
+    or round((v_subtotal - v_discount + v_shipping) * 100) <> p_amount_minor
+    or (v_snapshot.quote->>'total')::numeric * 100 <> p_amount_minor
+    or jsonb_typeof(v_snapshot.quote->'lines') is distinct from 'array'
+    or jsonb_array_length(v_snapshot.quote->'lines') <> jsonb_array_length(v_rpc->'p_items') then
+    raise exception 'Saved checkout amounts do not match payment';
   end if;
 
   if v_snapshot.order_id is null then
@@ -111,6 +136,46 @@ begin
     raise exception 'Recovered order does not match payment';
   end if;
 
+  if v_snapshot.order_id is null then
+    for v_line in
+      select item.value as item, line.value as quote
+      from jsonb_array_elements(v_rpc->'p_items') with ordinality item(value, position)
+      join jsonb_array_elements(v_snapshot.quote->'lines') with ordinality line(value, position)
+        on item.position = line.position
+    loop
+      if v_line.quote->>'productId' is distinct from v_line.item->>'product_id'
+        or (v_line.quote->>'quantity')::integer is distinct from (v_line.item->>'quantity')::integer
+        or coalesce((v_line.quote->>'convertedUnitPrice')::numeric, 0) <= 0
+        or coalesce((v_line.quote->>'convertedLineTotal')::numeric, 0) <= 0 then
+        raise exception 'Saved checkout line does not match order';
+      end if;
+      select count(*), min(id::text)::uuid into v_matches, v_item_id
+      from public.order_items
+      where order_id = v_order.id
+        and product_id = (v_line.item->>'product_id')::uuid
+        and quantity = (v_line.item->>'quantity')::integer
+        and coalesce(variant_info->>'size', '') = coalesce(v_line.item->'variant_info'->>'size', '')
+        and coalesce(variant_info->>'color', '') = coalesce(v_line.item->'variant_info'->>'color', '')
+        and coalesce(variant_info->>'sku', '') = coalesce(v_line.item->'variant_info'->>'sku', '');
+      if v_matches <> 1 then
+        raise exception 'Recovered order line does not match checkout';
+      end if;
+      update public.order_items
+      set price = (v_line.quote->>'convertedUnitPrice')::numeric,
+          customer_unit_price = (v_line.quote->>'convertedUnitPrice')::numeric,
+          customer_line_total = (v_line.quote->>'convertedLineTotal')::numeric
+      where id = v_item_id;
+    end loop;
+    update public.orders
+    set total_amount = p_amount_minor::numeric / 100,
+        product_subtotal = v_subtotal,
+        offer_discount = v_discount,
+        shipping_charge = v_shipping
+    where id = v_order.id;
+  elsif v_order.total_amount * 100 <> p_amount_minor then
+    raise exception 'Recovered order total does not match payment';
+  end if;
+
   update public.orders set payment_status = 'completed', updated_at = now()
     where id = v_order.id and payment_status is distinct from 'completed';
   insert into public.payment_intents (order_id, stripe_payment_intent_id, status, amount, currency)
@@ -124,6 +189,16 @@ begin
   end if;
   update public.payment_intents set status = 'succeeded'
     where stripe_payment_intent_id = p_payment_intent_id and status is distinct from 'succeeded';
+  if v_snapshot.order_id is null then
+    for v_cart_row in select value from jsonb_array_elements(v_snapshot.cart_snapshot)
+    loop
+      delete from public.cart_items
+      where id = (v_cart_row->>'id')::uuid
+        and user_id = v_snapshot.user_id
+        and quantity = (v_cart_row->>'quantity')::integer
+        and updated_at = (v_cart_row->>'updated_at')::timestamptz;
+    end loop;
+  end if;
   update public.uk_hosted_checkout_sessions
     set order_id = v_order.id, payment_intent_id = p_payment_intent_id, updated_at = now()
     where id = v_snapshot.id;

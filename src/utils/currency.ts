@@ -2,8 +2,9 @@
 // CURRENCY UTILITY — Exchange rates, conversion & formatting
 // ============================================================
 
-import { supabase } from '../lib/supabase';
-import { IS_UK_STOREFRONT, STOREFRONT_CURRENCY_CODE } from '../config/market';
+import { supabase } from '../lib/supabase.ts';
+import { IS_UK_STOREFRONT, STOREFRONT_CURRENCY_CODE } from '../config/market.ts';
+import { runtimeEnv } from '../lib/runtimeEnv.ts';
 
 type CountryCurrencyRow = {
   country_name: string | null;
@@ -136,8 +137,8 @@ const hasUsableRates = (rates: ExchangeRates): boolean => (
 );
 
 // Supabase project config — used for DB query and Edge Function fallback
-const SUPABASE_URL = (import.meta.env.VITE_SUPABASE_URL || '').replace(/\/+$/, '');
-const SUPABASE_ANON_KEY = import.meta.env.VITE_SUPABASE_ANON_KEY || '';
+const SUPABASE_URL = (runtimeEnv.VITE_SUPABASE_URL || '').replace(/\/+$/, '');
+const SUPABASE_ANON_KEY = runtimeEnv.VITE_SUPABASE_ANON_KEY || '';
 const EDGE_FN_URL = SUPABASE_URL ? `${SUPABASE_URL}/functions/v1/exchange-rates` : '';
 // Live-rate public fallback — used only when DB is unreachable
 const PUBLIC_FALLBACK_URL = 'https://open.er-api.com/v6/latest/USD';

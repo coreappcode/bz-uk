@@ -1,10 +1,11 @@
 import { createClient } from '@supabase/supabase-js';
+import { runtimeEnv, serverSupabaseKey } from './runtimeEnv.ts';
 
 // Supabase auth storage key — must match the project ref in VITE_SUPABASE_URL.
 export const AUTH_STORAGE_KEY = 'sb-aiiefgjfftmerayihpbv-auth-token';
 
-const rawSupabaseUrl = import.meta.env.VITE_SUPABASE_URL;
-const rawSupabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
+const rawSupabaseUrl = runtimeEnv.VITE_SUPABASE_URL;
+const rawSupabaseAnonKey = serverSupabaseKey || runtimeEnv.VITE_SUPABASE_ANON_KEY;
 
 const supabaseUrl = rawSupabaseUrl?.trim();
 const supabaseAnonKey = rawSupabaseAnonKey?.trim();
@@ -13,7 +14,7 @@ if (!supabaseUrl || !supabaseAnonKey) {
   throw new Error('Missing VITE_SUPABASE_URL or VITE_SUPABASE_ANON_KEY environment variables');
 }
 
-if (import.meta.env.PROD && !supabaseUrl.startsWith('https://')) {
+if (runtimeEnv.PROD && !supabaseUrl.startsWith('https://')) {
   throw new Error('In production, VITE_SUPABASE_URL must use https');
 }
 

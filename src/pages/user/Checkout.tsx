@@ -30,6 +30,7 @@ import { generateInvoicePdfBase64, type InvoicePdfData } from '../../utils/invoi
 import { buildInvoiceNumber } from '../../utils/idFormatter';
 import { isNativePlatform } from '../../mobile/nativePlatform';
 import { buildAppRedirect } from '../../utils/authEnv';
+import { IS_UK_STOREFRONT } from '../../config/market';
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -1723,6 +1724,11 @@ const Checkout: React.FC = () => {
   const navigate = useNavigate();
   const checkoutData = location.state as CheckoutLocationState | undefined;
   const checkoutPaymentProvider: CheckoutPaymentProvider = resolveCheckoutPaymentProvider();
+  const useUkHostedCheckout = IS_UK_STOREFRONT && !isNativePlatform
+    && checkoutPaymentProvider === 'stripe'
+    && import.meta.env.VITE_UK_HOSTED_CHECKOUT === 'true'
+    && typeof window !== 'undefined'
+    && ['bzead.uk', 'www.bzead.uk'].includes(window.location.hostname.toLowerCase());
 
   const { rates, formatPrice } = useCurrency();
   const [clientSecret, setClientSecret] = useState<string | null>(null);
@@ -1746,7 +1752,14 @@ const Checkout: React.FC = () => {
   // recover from transient backend / network failures on slow mobile links.
   const [paymentInitRetryToken, setPaymentInitRetryToken] = useState(0);
   const [revolutRedirectLoading, setRevolutRedirectLoading] = useState(false);
+  const [ukQuote, setUkQuote] = useState<{ snapshotId: string; total: number; shipping: number } | null>(null);
+  const [ukSessionId, setUkSessionId] = useState<string | null>(null);
+  const [ukRedirectLoading, setUkRedirectLoading] = useState(false);
   const quoteRequestRef = useRef(0);
+  const ukQuoteRequestRef = useRef<{
+    key: string;
+    request: ReturnType<typeof supabase.functions.invoke>;
+  } | null>(null);
 
   // Fetch SKU/HSN for display
   useEffect(() => {
@@ -1891,6 +1904,51 @@ const Checkout: React.FC = () => {
           return;
         }
 
+        if (useUkHostedCheckout) {
+          setUkQuote(null);
+          setUkSessionId(null);
+          const cartItemIds = checkoutData.items.map((item) => item.cartItemId).filter((id): id is string => Boolean(id));
+          if (cartItemIds.length !== checkoutData.items.length) {
+            throw new Error('Your selected cart items could not be verified. Please return to your cart.');
+          }
+          const body = {
+            cartItemIds,
+            shippingAddress: checkoutData.shippingAddress,
+            shippingTier: checkoutData.shippingTier || 'standard',
+            customerName: checkoutData.customerName,
+            customerPhone: checkoutData.customerPhone,
+            notes: checkoutData.notes,
+          };
+          const requestKey = JSON.stringify({ body, paymentInitRetryToken });
+          if (ukQuoteRequestRef.current?.key !== requestKey) {
+            ukQuoteRequestRef.current = {
+              key: requestKey,
+              request: supabase.functions.invoke('quote-uk-hosted-checkout', { body }),
+            };
+          }
+          const { data, error } = await ukQuoteRequestRef.current.request;
+          if (cancelled) return;
+          if (error) {
+            if (error.context instanceof Response) {
+              const details: unknown = await error.context.clone().json();
+              if (details && typeof details === 'object') {
+                if ('sessionId' in details && typeof details.sessionId === 'string') setUkSessionId(details.sessionId);
+                if ('error' in details && typeof details.error === 'string') throw new Error(details.error);
+              }
+            }
+            throw new Error('Unable to verify your checkout. Please return to review and try again.');
+          }
+          if (!data || typeof data !== 'object'
+            || !('snapshotId' in data) || typeof data.snapshotId !== 'string'
+            || !('total' in data) || typeof data.total !== 'number'
+            || !('shipping' in data) || typeof data.shipping !== 'number'
+            || !('currency' in data) || data.currency !== 'GBP') {
+            throw new Error('The checkout quote is invalid. Please return to review.');
+          }
+          if (!cancelled) setUkQuote({ snapshotId: data.snapshotId, total: data.total, shipping: data.shipping });
+          return;
+        }
+
         const checkoutCurrency = (checkoutData.currency || 'INR').toUpperCase();
 
         const stripePublishableKey = String(import.meta.env.VITE_STRIPE_PUBLISHABLE_KEY || '').trim();
@@ -1935,7 +1993,7 @@ const Checkout: React.FC = () => {
     return () => {
       cancelled = true;
     };
-  }, [checkoutData, liveQuote, liveQuoteLoading, liveQuoteError, paymentInitRetryToken, checkoutPaymentProvider]);
+  }, [checkoutData, liveQuote, liveQuoteLoading, liveQuoteError, paymentInitRetryToken, checkoutPaymentProvider, useUkHostedCheckout]);
 
   // --- Derived values (computed before early returns so hooks below are always called) ---
   // Cash on Delivery is not offered by the web checkout.
@@ -1945,6 +2003,29 @@ const Checkout: React.FC = () => {
   const minimumOrderNotMet = Boolean(
     liveQuote?.minimumOrderConstraint && !liveQuote.minimumOrderConstraint.isMet
   );
+
+  const handleUkHostedCheckout = useCallback(async () => {
+    if (!ukQuote) return;
+    setUkRedirectLoading(true);
+    setInitError(null);
+    try {
+      const { data, error } = await supabase.functions.invoke('create-uk-hosted-checkout', {
+        body: { snapshotId: ukQuote.snapshotId },
+      });
+      if (error || !data || typeof data.checkoutUrl !== 'string' || typeof data.sessionId !== 'string') {
+        throw new Error('Unable to open the payment page. Please check the status before trying again.');
+      }
+      const destination = new URL(data.checkoutUrl);
+      if (destination.protocol !== 'https:' || destination.hostname !== 'checkout.stripe.com') {
+        throw new Error('The payment page address could not be verified.');
+      }
+      window.location.assign(destination.href);
+    } catch (error) {
+      console.error('[Checkout] UK hosted checkout failed:', error);
+      setInitError(error instanceof Error ? error.message : 'Unable to open the payment page.');
+      setUkRedirectLoading(false);
+    }
+  }, [ukQuote]);
 
   const handleRevolutCheckout = useCallback(async () => {
     if (!checkoutData || !liveQuote) return;
@@ -2367,6 +2448,14 @@ const Checkout: React.FC = () => {
               Payment Initialization Failed
               </h2>
               <p className="text-sm text-red-700 mb-5 md:mb-6 break-words">{initError}</p>
+              {ukSessionId && (
+                <button
+                  onClick={() => navigate(`/checkout/uk-payment-return?session_id=${encodeURIComponent(ukSessionId)}`)}
+                  className="mb-4 px-5 py-2.5 bg-blue-600 text-white rounded-md font-semibold text-sm"
+                >
+                  Check existing payment
+                </button>
+              )}
               <div className="flex flex-col sm:flex-row gap-2.5 sm:gap-3 justify-center">
               <button
                 onClick={() => {
@@ -2395,7 +2484,7 @@ const Checkout: React.FC = () => {
     }
   }
 
-  if (checkoutPaymentProvider === 'stripe' && !initError && (!clientSecret || !paymentIntentId || !customerSessionClientSecret)) {
+  if (checkoutPaymentProvider === 'stripe' && !useUkHostedCheckout && !initError && (!clientSecret || !paymentIntentId || !customerSessionClientSecret)) {
     return (
       <>
         <Header />
@@ -2411,7 +2500,7 @@ const Checkout: React.FC = () => {
   }
 
   // --- Main checkout UI ---
-  const stripePromise = checkoutPaymentProvider === 'stripe' ? getStripe() : null;
+  const stripePromise = checkoutPaymentProvider === 'stripe' && !useUkHostedCheckout ? getStripe() : null;
 
   return (
     <div className="min-h-screen bg-[#eaeded] flex flex-col">
@@ -2471,6 +2560,20 @@ const Checkout: React.FC = () => {
             </div>
           )}
           </>
+        ) : useUkHostedCheckout ? (
+          <div className="max-w-2xl mx-auto bg-white border border-[#ddd] rounded-lg p-6 space-y-4">
+            <h3 className="text-lg font-bold text-[#0f1111]">Pay securely with Stripe</h3>
+            <p className="text-sm text-[#555]">You will be redirected to Stripe to complete your payment.</p>
+            <p className="text-sm">Delivery: {fmtCurrency(ukQuote?.shipping ?? 0, 'GBP')}</p>
+            {ukQuote && liveQuote && Math.round(ukQuote.total * 100) !== Math.round(liveQuote.totalAmount * 100) && (
+              <p className="text-sm text-amber-800">Your checkout total has been updated after checking current prices and delivery.</p>
+            )}
+            <button onClick={handleUkHostedCheckout} disabled={ukRedirectLoading || !ukQuote}
+              className="w-full py-3.5 bg-[#ffd814] hover:bg-[#f7ca00] border border-[#fcd200] disabled:opacity-50 rounded-lg font-bold">
+              {ukRedirectLoading ? 'Opening secure payment...' : `Continue to Stripe - ${fmtCurrency(ukQuote?.total ?? 0, 'GBP')}`}
+            </button>
+            <button onClick={() => navigate('/checkout/review')} className="text-sm text-[#007185] hover:underline">Back to review</button>
+          </div>
         ) : checkoutPaymentProvider === 'revolut' ? (
           <div className="max-w-2xl mx-auto bg-white border border-[#ddd] rounded-lg p-6 space-y-4">
             <h3 className="text-lg font-bold text-[#0f1111]">Pay securely with Revolut</h3>

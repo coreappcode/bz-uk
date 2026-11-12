@@ -357,15 +357,19 @@ Apply the `20261111000000_stripe_customer_mapping.sql` migration and deploy
 `create-payment-intent` before deploying the client. This applies only to
 Stripe checkout, not the separate Revolut checkout.
 
-The UK hosted-checkout functions and recovery migration are preparatory code
-only; the existing storefront checkout is unchanged. The session-creation
-function accepts only a server-created, service-role-only snapshot, but no
-authoritative quote/snapshot producer exists yet. The UK webhook uses
+The UK hosted-checkout flow remains preparatory and must stay disabled.
+The client branch is gated by `VITE_UK_HOSTED_CHECKOUT=true`, the UK market,
+the bzead.uk hostname, web runtime, and the Stripe provider. Its quote and
+session-creation functions also require `UK_HOSTED_CHECKOUT_ENABLED=true`.
+Do not set either flag yet. Quotes use server-side cart and pricing data and
+are stored in service-role-only snapshots. The UK webhook uses
 `UK_STRIPE_SECRET_KEY`, `UK_STRIPE_ACCOUNT_ID`, and a separate
 `UK_STRIPE_WEBHOOK_SECRET`; it does not use or replace the existing webhook.
-Do not enable the flow until server pricing and order financial reconciliation,
-selective cart cleanup, push notifications, retry handling, and end-to-end
-testing are complete. UK refunds remain manual.
+Do not deploy or enable the flow until inventory reservation, financial
+reconciliation, push notifications, retry handling, and end-to-end testing
+are complete. In particular, stock can change between payment and order
+creation, and seller payout and FX snapshots must match the confirmed quote.
+UK refunds remain manual.
 
 Browser-invoked Edge Functions use explicit CORS allowlists. Keep storefront
 origins in those lists (`https://www.bzead.uk`, `https://bzead.uk`,
