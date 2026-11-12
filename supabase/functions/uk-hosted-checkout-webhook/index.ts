@@ -1,5 +1,7 @@
 import Stripe from "https://esm.sh/stripe@17.7.0?target=deno";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { recoverUkHostedCheckout } from "../_shared/uk-hosted-checkout.ts";
+import { sendUkOrderEmail } from "../_shared/uk-order-email.ts";
 
 function json(body: unknown, status: number) {
   return new Response(JSON.stringify(body), {
@@ -26,7 +28,10 @@ Deno.serve(async (req: Request) => {
   const signature = req.headers.get("stripe-signature");
   if (!signature) return json({ error: "Missing signature" }, 400);
 
-  const stripe = new Stripe(stripeKey, { httpClient: Stripe.createFetchHttpClient() });
+  const stripe = new Stripe(stripeKey, {
+    apiVersion: "2025-02-24.acacia",
+    httpClient: Stripe.createFetchHttpClient(),
+  });
   let event: Stripe.Event;
   try {
     event = await stripe.webhooks.constructEventAsync(
@@ -50,32 +55,13 @@ Deno.serve(async (req: Request) => {
     }
 
     const eventSession = event.data.object as Stripe.Checkout.Session;
-    const session = await stripe.checkout.sessions.retrieve(eventSession.id);
-    if (session.payment_status !== "paid") return json({ received: true }, 200);
-    const snapshotId = session.metadata?.uk_checkout_snapshot_id;
-    const paymentIntentId = typeof session.payment_intent === "string"
-      ? session.payment_intent : session.payment_intent?.id;
-    if (!snapshotId || !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(snapshotId) ||
-        !paymentIntentId || !session.amount_total || session.currency !== "gbp" ||
-        session.livemode !== livemode) {
-      throw new Error("Invalid UK Checkout Session");
-    }
-    const payment = await stripe.paymentIntents.retrieve(paymentIntentId);
-    if (payment.status !== "succeeded" || payment.livemode !== livemode ||
-        payment.amount_received !== session.amount_total || payment.currency !== session.currency) {
-      throw new Error("Captured payment does not match Checkout Session");
-    }
     const db = createClient(supabaseUrl, serviceKey);
-    const { data: order, error } = await db.rpc("recover_uk_hosted_checkout", {
-      p_snapshot_id: snapshotId,
-      p_session_id: session.id,
-      p_account_id: accountId,
-      p_livemode: livemode,
-      p_payment_intent_id: payment.id,
-      p_amount_minor: payment.amount_received,
-      p_currency: payment.currency,
-    });
-    if (error || !order?.id) throw error || new Error("Order recovery returned no order");
+    const result = await recoverUkHostedCheckout(stripe, db, eventSession.id, accountId, livemode);
+    if (result.status === "paid") {
+      const { error } = await db.rpc("notify_uk_hosted_order", { p_snapshot_id: result.snapshotId });
+      if (error) throw error;
+      await sendUkOrderEmail(db, supabaseUrl, serviceKey, result.orderId);
+    }
     return json({ received: true }, 200);
   } catch (error) {
     console.error("[uk-hosted-checkout-webhook] Payment recovery failed:", error);

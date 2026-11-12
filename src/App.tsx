@@ -89,6 +89,7 @@ const Checkout = lazyRetry(() => import('./pages/user/Checkout'));
 const ShippingAddressPage = lazyRetry(() => import('./pages/user/ShippingAddress'));
 const OrderSummaryPage = lazyRetry(() => import('./pages/user/OrderSummary'));
 const OrderConfirmationPage = lazyRetry(() => import('./pages/user/OrderConfirmation'));
+const UkHostedCheckoutReturn = lazyRetry(() => import('./pages/user/UkHostedCheckoutReturn'));
 
 // Public pages
 const ProductDetailsPage = lazyRetry(() => import('./pages/ProductDetailsPage'));
@@ -376,6 +377,7 @@ function App() {
                   <Route path="/checkout/review" element={<OrderSummaryPage />} />
                   <Route path="/checkout/payment" element={<Checkout />} />
                   <Route path="/checkout/confirmation" element={<OrderConfirmationPage />} />
+                  <Route path="/checkout/uk-payment-return" element={<UkHostedCheckoutReturn />} />
                   
                   <Route path="/seller" element={<ExternalSellerRedirect />} />
                   <Route path="/seller/*" element={<ExternalSellerRedirect />} />

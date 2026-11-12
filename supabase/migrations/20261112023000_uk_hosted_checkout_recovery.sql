@@ -11,6 +11,7 @@ create table public.uk_hosted_checkout_sessions (
   rpc_params jsonb not null check (jsonb_typeof(rpc_params) = 'object'),
   order_id uuid references public.orders(id),
   payment_intent_id text unique,
+  notifications_created_at timestamptz,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
 );
@@ -134,5 +135,49 @@ revoke all on function public.recover_uk_hosted_checkout(uuid, text, text, boole
   from public, anon, authenticated;
 grant execute on function public.recover_uk_hosted_checkout(uuid, text, text, boolean, text, bigint, text)
   to service_role;
+
+create function public.notify_uk_hosted_order(p_snapshot_id uuid)
+returns void
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_snapshot public.uk_hosted_checkout_sessions%rowtype;
+begin
+  if coalesce(auth.role(), '') <> 'service_role' then
+    raise exception 'Unauthorized';
+  end if;
+  select * into v_snapshot from public.uk_hosted_checkout_sessions
+    where id = p_snapshot_id for update;
+  if not found or v_snapshot.order_id is null or not exists (
+    select 1 from public.orders o where o.id = v_snapshot.order_id
+      and o.user_id = v_snapshot.user_id and o.payment_status = 'completed'
+  ) then
+    raise exception 'UK paid order not found';
+  end if;
+  if v_snapshot.notifications_created_at is not null then
+    return;
+  end if;
+  insert into public.notifications (user_id, type, title, message, metadata)
+  select recipients.user_id, 'order_placed', 'Order Placed Successfully',
+    'Your order has been placed and is being processed.',
+    jsonb_build_object('order_id', v_snapshot.order_id, 'order_number', v_snapshot.order_id)
+  from (
+    select v_snapshot.user_id as user_id
+    union
+    select oi.seller_id from public.order_items oi
+      where oi.order_id = v_snapshot.order_id and oi.seller_id is not null
+    union
+    select p.id from public.profiles p where p.role = 'admin'
+  ) recipients;
+  update public.uk_hosted_checkout_sessions
+    set notifications_created_at = now(), updated_at = now()
+    where id = p_snapshot_id;
+end;
+$$;
+
+revoke all on function public.notify_uk_hosted_order(uuid) from public, anon, authenticated;
+grant execute on function public.notify_uk_hosted_order(uuid) to service_role;
 
 commit;
