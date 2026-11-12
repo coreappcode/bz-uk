@@ -357,6 +357,14 @@ Apply the `20261111000000_stripe_customer_mapping.sql` migration and deploy
 `create-payment-intent` before deploying the client. This applies only to
 Stripe checkout, not the separate Revolut checkout.
 
+The UK hosted-checkout recovery migration and `uk-hosted-checkout-webhook`
+are preparatory code only and are not an enabled payment flow. The webhook
+uses `UK_STRIPE_SECRET_KEY`, `UK_STRIPE_ACCOUNT_ID`, and a separate
+`UK_STRIPE_WEBHOOK_SECRET`; it does not use or replace the existing Stripe
+webhook. Do not deploy or register it until UK session creation, authoritative
+pricing, notification delivery, return handling, and end-to-end testing are
+complete. UK refunds remain manual.
+
 Browser-invoked Edge Functions use explicit CORS allowlists. Keep storefront
 origins in those lists (`https://www.bzead.uk`, `https://bzead.uk`,
 `https://www.bzead.com`, `https://bzead.com`, `https://www.bzead.in`,
