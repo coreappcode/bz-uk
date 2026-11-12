@@ -357,6 +357,17 @@ Apply the `20261111000000_stripe_customer_mapping.sql` migration and deploy
 `create-payment-intent` before deploying the client. This applies only to
 Stripe checkout, not the separate Revolut checkout.
 
+An isolated UK Stripe refund backend is being prepared for the separate UK
+Stripe account. It is not yet wired to hosted checkout or the admin refund
+interface and must not be enabled as a production payment flow yet. The UK
+payment backend must record verified payments in `uk_stripe_order_payments`
+before the UK refund function can process them. Configure
+`UK_STRIPE_SECRET_KEY` and `UK_STRIPE_ACCOUNT_ID` separately from the existing
+Stripe credentials. The separate `uk-stripe-refund-webhook` requires
+`UK_STRIPE_REFUND_WEBHOOK_SECRET` and its own Stripe endpoint subscribed to
+`refund.created`, `refund.updated`, and `refund.failed`. Existing Stripe
+credentials and the existing webhook must not be changed.
+
 Browser-invoked Edge Functions use explicit CORS allowlists. Keep storefront
 origins in those lists (`https://www.bzead.uk`, `https://bzead.uk`,
 `https://www.bzead.com`, `https://bzead.com`, `https://www.bzead.in`,
