@@ -353,9 +353,6 @@ Stripe checkout uses a server-only `stripe_customers` mapping and a Stripe
 Customer Session to let signed-in buyers opt in to saving cards, select them at
 a later checkout, and remove them through the Payment Element. Card details
 remain with Stripe; the application stores only the Stripe customer reference.
-Buyers can also opt in to Stripe Link on the payment page to access cards saved
-with Link. Link cards and cards saved to the Stripe customer are separate; Link
-availability and authentication are controlled by Stripe.
 Apply the `20261111000000_stripe_customer_mapping.sql` migration and deploy
 `create-payment-intent` before deploying the client. This applies only to
 Stripe checkout, not the separate Revolut checkout.
